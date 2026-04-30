@@ -66,6 +66,19 @@ def download_file(
             resp = requests.get(url, headers=headers, stream=True, timeout=timeout)
             resp.raise_for_status()
 
+            content_type = resp.headers.get("content-type", "").lower()
+            if "html" in content_type:
+                # data.cms.gov dataset-landing pages return text/html. Bail
+                # before writing 100KB of HTML where a multi-GB CSV belongs.
+                log.error(
+                    f"  ✗ Server returned HTML (content-type={content_type}). "
+                    f"URL is a dataset page, not a static CSV: {url}"
+                )
+                resp.close()
+                if attempt == retries:
+                    return None
+                continue
+
             total = int(resp.headers.get("content-length", 0))
 
             with open(dest, "wb") as f, tqdm(
@@ -97,10 +110,40 @@ def download_file(
     return None
 
 
+_HTML_SNIFF_TOKENS = (b"<!doctype html", b"<html", b"<!DOCTYPE HTML", b"<HTML")
+
+
+def _looks_like_html(filepath: Path) -> bool:
+    """Sniff the first KB to detect HTML disguised as a .csv file."""
+    try:
+        with open(filepath, "rb") as f:
+            head = f.read(1024).lstrip()
+    except OSError:
+        return False
+    head_lower = head.lower()
+    return head_lower.startswith(b"<!doctype html") or head_lower.startswith(b"<html")
+
+
 def validate_csv(filepath: Path, min_rows: int = 100) -> bool:
-    """Quick sanity check: is this a real CSV with a header and data?"""
+    """
+    Sanity-check a downloaded file. Fails on:
+      - missing file
+      - HTML content (dataset landing page mistakenly saved as .csv)
+      - missing/comma-less header
+      - row count below ``min_rows``
+    """
     if filepath is None or not filepath.exists():
         return False
+
+    if _looks_like_html(filepath):
+        size_kb = filepath.stat().st_size / 1024
+        log.error(
+            f"  ✗ {filepath.name}: file is HTML, not CSV ({size_kb:.1f} KB). "
+            f"The configured URL likely points at a dataset page rather "
+            f"than a static .csv. Update src/config.py and re-download."
+        )
+        return False
+
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             header = f.readline()

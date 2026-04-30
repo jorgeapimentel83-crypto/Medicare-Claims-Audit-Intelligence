@@ -36,12 +36,10 @@ for p in PATHS.values():
 # CMS Public Use File Download URLs
 # ---------------------------------------------------------------------------
 # All datasets are public, de-identified — no DUA, no authentication.
-# The data.cms.gov site occasionally changes URL patterns. If a download
-# breaks, visit the dataset page and grab the updated link.
 #
-# Primary dataset page:
-#   https://data.cms.gov/provider-summary-by-type-of-service/
-#          medicare-physician-other-practitioners
+# These are the verified static CSV URLs published under
+# data.cms.gov/sites/default/files/. The /data/{year} dataset-page URLs
+# return HTML, not CSV — do not use them as download sources.
 # ---------------------------------------------------------------------------
 CMS_DATASETS = {
     # NPI × HCPCS × POS level — primary audit dataset (~10M rows, ~2GB)
@@ -49,14 +47,9 @@ CMS_DATASETS = {
         "name": "Medicare Physician & Other Practitioners — by Provider and Service",
         "urls": {
             "2022": (
-                "https://data.cms.gov/provider-summary-by-type-of-service/"
-                "medicare-physician-other-practitioners/"
-                "medicare-physician-other-practitioners-by-provider-and-service/data/2022"
-            ),
-            "2021": (
-                "https://data.cms.gov/provider-summary-by-type-of-service/"
-                "medicare-physician-other-practitioners/"
-                "medicare-physician-other-practitioners-by-provider-and-service/data/2021"
+                "https://data.cms.gov/sites/default/files/2025-11/"
+                "53fb2bae-4913-48dc-a6d4-d8c025906567/"
+                "MUP_PHY_R25_P05_V20_D22_Prov_Svc.csv"
             ),
         },
         "filename": "provider_service_{year}.csv",
@@ -67,9 +60,9 @@ CMS_DATASETS = {
         "name": "Medicare Physician & Other Practitioners — by Provider",
         "urls": {
             "2022": (
-                "https://data.cms.gov/provider-summary-by-type-of-service/"
-                "medicare-physician-other-practitioners/"
-                "medicare-physician-other-practitioners-by-provider/data/2022"
+                "https://data.cms.gov/sites/default/files/2025-11/"
+                "adcd20c5-4534-43cd-8dfa-881ebe7bacfd/"
+                "MUP_PHY_R25_P07_V20_D22_Prov.csv"
             ),
         },
         "filename": "provider_agg_{year}.csv",
@@ -80,9 +73,9 @@ CMS_DATASETS = {
         "name": "Medicare Physician & Other Practitioners — by Geography and Service",
         "urls": {
             "2022": (
-                "https://data.cms.gov/provider-summary-by-type-of-service/"
-                "medicare-physician-other-practitioners/"
-                "medicare-physician-other-practitioners-by-geography-and-service/data/2022"
+                "https://data.cms.gov/sites/default/files/2024-05/"
+                "3167b4d9-10c0-48f0-a680-1165f4eec064/"
+                "MUP_PHY_R24_P05_V10_D22_Geo.csv"
             ),
         },
         "filename": "geo_service_{year}.csv",
