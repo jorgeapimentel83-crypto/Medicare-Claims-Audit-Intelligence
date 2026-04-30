@@ -4,13 +4,62 @@
 #
 # **Author**: Federal Healthcare Auditor (HHS/OIG, ~11 years)
 #
-# Every feature below maps to a real red flag pattern from OIG investigations.
-# The model will be trained in Notebook 03; this notebook builds the features
-# and validates they surface suspicious patterns.
+# This notebook builds ~28 audit-priority features from the public CMS
+# Medicare Part B Provider & Service file. Each feature is grounded in
+# patterns auditors commonly use to prioritize where to look first — not
+# as evidence of wrongdoing, but as starting points for review.
+#
+# The supervised model is trained in Notebook 03. This notebook focuses
+# on building the features, sanity-checking their distributions, and
+# saving them to Parquet for downstream notebooks.
 #
 # ### Data Source
-# CMS Medicare Physician & Other Practitioners PUF — public, de-identified.
-# Downloaded via `python src/download_data.py`.
+# CMS Medicare Physician & Other Practitioners PUF — public, de-identified,
+# downloaded via `python src/download_data.py`.
+#
+# ---
+# ### ⚠ Important Limitation — read before continuing
+#
+# This notebook **does not identify fraud, overpayments, or noncompliance.**
+# It builds **audit-priority features** from public summary data.
+#
+# - The CMS PUF data is aggregated and small-cell-suppressed; it lacks
+#   the medical records, modifiers, beneficiary detail, and longitudinal
+#   context needed to support any compliance conclusion.
+# - High feature scores indicate **patterns that may warrant follow-up
+#   review** — they do not indicate wrongdoing. Many high-scoring
+#   providers are practicing entirely appropriately given their
+#   specialty, geography, or patient panel.
+# - A real audit conclusion would require pulling claims-level records,
+#   reviewing applicable LCDs/NCDs and CMS policy, gathering provider
+#   context (subspecialty, group setting, patient mix), and applying
+#   professional auditor judgment.
+#
+# Treat the outputs of this notebook as a **prioritized worklist for
+# educational analysis**, not as findings.
+
+# %% [markdown]
+# ### Setup and environment
+#
+# **Business Purpose** — Wire the notebook into the project so every
+# cell pulls paths, palette, and helpers from the same place
+# (`src/config.py`). This avoids drift between notebooks.
+#
+# **Plain-English Logic** — Add `src/` to the Python path, import the
+# project's data loaders and feature builders, and configure the
+# matplotlib / seaborn defaults.
+#
+# **Expected Output** — A banner printing whether GPU acceleration is
+# available and which CMS year we will analyze.
+#
+# **Why It Matters** — If the import path or config is wrong, every
+# downstream cell will fail. Catching it here saves a lot of confusion
+# later.
+#
+# **What to Check Before Moving On**
+# - The banner prints with no `ImportError`.
+# - `YEAR` matches the data file you actually downloaded.
+# - GPU status matches your machine. CPU is fine for this notebook.
 
 # %%
 import sys
@@ -52,10 +101,50 @@ print(f"{'='*60}")
 # ---
 # ## 1. Load Data
 #
-# Primary dataset: **Provider-Service level** — one row per
-# (NPI × HCPCS code × Place of Service). ~10M rows for a full year.
+# **Business Purpose** — Pull the primary dataset into memory and run a
+# one-shot quality report. Everything downstream depends on this frame.
 #
-# Set `SAMPLE_SIZE` to 500,000 for quick iteration, `None` for full data.
+# **Plain-English Logic** — `load_provider_service` reads the CSV using
+# the dtype map from `src/config.py`, optionally sampling the first
+# `nrows`. `quality_report` summarizes shape, missingness, and key
+# cardinalities so you can spot something off (wrong year, truncated
+# file, schema drift) before building features on it.
+#
+# **Expected Output** — A dataframe of roughly 10M rows for a full year
+# (or `SAMPLE_SIZE` rows if set), and a printed quality report.
+#
+# **Why It Matters** — The Provider & Service file is the analytical unit
+# of this whole notebook. If it loads wrong, everything else is wrong.
+#
+# **What to Check Before Moving On**
+# - Row count is in the expected range (full year ≈ 10M).
+# - No "file is HTML" or dtype errors during load.
+# - The quality report's missingness columns make sense — heavy NaN on
+#   beneficiary-count fields is **expected** (small-cell suppression).
+#
+# ### Learning note — what is "provider-service level" data?
+#
+# CMS publishes the same Part B information at three levels of
+# aggregation. We are using the most granular one:
+#
+# | Level | One row per | Use for |
+# |---|---|---|
+# | Provider-Service (this file) | NPI × HCPCS code × Place of Service | Per-procedure billing patterns, peer comparisons |
+# | Provider (aggregate) | NPI | Provider-wide totals, exclusion-list joining |
+# | Geography & Service | State × HCPCS | National / state benchmarks |
+#
+# - **NPI** is the National Provider Identifier — a 10-digit ID that
+#   uniquely identifies the rendering provider.
+# - **HCPCS** is the procedure code billed (e.g., `99213` for an
+#   established-patient office visit).
+# - **Place of Service** is the setting (office, hospital outpatient,
+#   etc.).
+#
+# A single NPI usually has dozens of rows in this file — one for each
+# procedure they billed in each setting where they billed it.
+#
+# Iteration tip: set `SAMPLE_SIZE = 500_000` while developing, then
+# `None` for the production run.
 
 # %%
 SAMPLE_SIZE = None  # Set to 500_000 for dev, None for full run
@@ -67,10 +156,34 @@ qr = quality_report(df, f"Provider-Service {YEAR}")
 # ---
 # ## 2. Data Quality Assessment
 #
-# CMS PUFs have known data quality patterns to be aware of:
-# - **Small-cell suppression**: values where <11 beneficiaries → NaN
-# - **Entity mix**: Individual providers (I) vs Organizations (O)
-# - **Medicare participation**: participating vs non-participating providers
+# **Business Purpose** — Confirm the data has the structure and
+# cardinality we expect before building features on top of it.
+#
+# **Plain-English Logic** — Print the entity-type breakdown (individual
+# providers vs organizations) and counts of unique NPIs, HCPCS codes,
+# specialties, and states. These are sanity checks, not findings.
+#
+# **Expected Output** — Several hundred thousand to ~1M unique NPIs,
+# thousands of distinct HCPCS codes, ~50 states/territories.
+#
+# **Why It Matters** — If unique NPIs is suspiciously low, the file may
+# be truncated. If state count is 1, you may be looking at a
+# single-state extract rather than the national file.
+#
+# **What to Check Before Moving On**
+# - Entity mix is roughly the expected `I` (individual) heavy split.
+# - No single field has implausible cardinality (e.g., 1 specialty).
+#
+# ### CMS PUF data quality patterns to be aware of
+# - **Small-cell suppression**: rows with fewer than 11 beneficiaries
+#   have beneficiary-related fields nulled out. This is privacy
+#   protection, not missing data — do not impute it.
+# - **Entity mix**: Individual providers (`I`) vs Organizations (`O`).
+#   Organizations behave differently and are often filtered out of
+#   provider-level analytics.
+# - **Medicare participation**: participating vs non-participating
+#   providers have different fee-schedule behavior — relevant when
+#   interpreting submitted-charge ratios later.
 
 # %%
 # Entity type distribution
@@ -86,9 +199,50 @@ print(f"Unique states: {df['Rndrng_Prvdr_State_Abrvtn'].nunique():,}")
 # ---
 # ## 3. Specialty and Payment Landscape
 #
-# Understanding the specialty mix is critical for peer-group benchmarking.
-# An orthopedic surgeon billing like a dermatologist is a red flag — but only
-# if you know what "normal" looks like for each specialty.
+# **Business Purpose** — Build intuition for which specialties drive
+# most Part B spend, and the typical gap between submitted charges and
+# Medicare-allowed amounts. This grounds every later peer-comparison
+# feature.
+#
+# **Plain-English Logic** — Group rows by rendering-provider specialty,
+# sum total payments and services, and plot the top 15. The second
+# panel shows the average submitted charge vs. the average Medicare
+# payment for those same specialties.
+#
+# **Expected Output** — Two horizontal bar charts saved to
+# `reports/specialty_distribution.png`, plus a one-line printout of
+# what share of total Part B payments the top 15 specialties account
+# for.
+#
+# **Why It Matters** — A peer comparison only makes sense within a
+# specialty. Comparing a cardiologist's billing to a podiatrist's
+# tells you nothing — comparing a cardiologist to other cardiologists
+# tells you everything.
+#
+# **What to Check Before Moving On**
+# - The top specialties (Internal Medicine, Family Practice, etc.)
+#   match public CMS reporting.
+# - The charge-vs-payment gap is *always* present; that is normal — it
+#   reflects the difference between provider-set "list price" and the
+#   Medicare fee schedule. We are not flagging the gap itself; we will
+#   later flag providers whose ratio is far from their specialty
+#   peers.
+#
+# ### Learning note — peer-group benchmarking
+#
+# A bare statistic like "this provider billed 8,000 services" means
+# nothing on its own. The same number is unremarkable for a
+# high-volume primary-care practice and unusual for a niche surgical
+# specialty.
+#
+# Peer-group benchmarking compares each provider against others in
+# the **same specialty** (and ideally same state). The benchmarking
+# step converts raw values into z-scores, percentiles, or ratios
+# *within* the peer group — so the resulting feature is "how
+# unusual is this provider vs. their peers", not "how big is their
+# raw number". That is the audit-analytics literature's most
+# durable signal: outliers defined relative to peers, not against
+# the population at large.
 
 # %%
 specialty_stats = (
@@ -133,10 +287,28 @@ print(f"Top {top_n} specialties = {pct:.1f}% of all Part B payments")
 
 # %% [markdown]
 # ---
-# ## 4. Build All Audit Features
+# ## 4. Build All Audit-Priority Features
 #
-# `features.build_all_features()` applies 10 feature-building steps
-# producing ~28 features. Each maps to a real OIG audit red flag.
+# **Business Purpose** — Run the feature pipeline that produces the
+# ~28 domain-informed review signals downstream notebooks consume.
+#
+# **Plain-English Logic** — `build_all_features()` (in
+# `src/features.py`) applies 10 sequential steps: charge ratios, peer
+# deviation, service concentration (HHI), volume anomalies, modifier
+# flags, geographic unusualness, and a weighted composite. Each step
+# adds columns prefixed with `feat_`.
+#
+# **Expected Output** — A printed count of how many `feat_` columns
+# now exist on `df` (target: ~28).
+#
+# **Why It Matters** — This is the heart of the notebook. Every later
+# visualization, score, and saved Parquet file derives from these
+# columns.
+#
+# **What to Check Before Moving On**
+# - The "✓ N features built" line shows roughly 28.
+# - No silent warnings about NaN-only columns (would suggest a
+#   feature step found nothing to operate on).
 
 # %%
 import logging
@@ -151,11 +323,54 @@ print(f"\n✓ {len(feat_cols)} features built")
 # ---
 # ## 5. Feature Distributions
 #
+# This section spot-checks three of the most informative features. The
+# goal is to confirm each one has a reasonable distribution shape — not
+# to draw conclusions about any specific provider.
+#
 # ### 5.1 Billing Aggressiveness (Charge-to-Allowed Ratio)
 #
-# **What it catches**: Providers systematically inflating submitted charges
-# above the Medicare fee schedule. Extreme ratios (10x+) indicate potential
-# upcoding or charge inflation affecting secondary payers.
+# **Business Purpose** — Surface providers whose submitted charges are
+# unusually high relative to what Medicare allows for the same
+# procedure.
+#
+# **Plain-English Logic** — For every row, divide the average
+# submitted charge by the average Medicare-allowed amount. Then look
+# at the distribution overall and by specialty.
+#
+# **Expected Output** — A right-skewed histogram (most providers
+# cluster at modest multiples of allowed; a long tail extends out to
+# 10× and beyond), plus a per-specialty median.
+#
+# **Why It Matters** — Most providers' submitted charges sit at a
+# relatively stable multiple of the fee schedule. Providers whose
+# ratio is far above their specialty's median may warrant follow-up
+# review — often for legitimate reasons (out-of-network billing,
+# secondary-payer chargemaster effects), but still worth a closer
+# look.
+#
+# **What to Check Before Moving On**
+# - The histogram's median is sensible (Part B providers typically
+#   sit in the 2×–5× range; specialty-dependent).
+# - The per-specialty bar chart shows variation, not a flat line —
+#   that confirms specialty *does* matter as a benchmark.
+#
+# ### Learning note — what is the charge-to-allowed ratio?
+#
+# Medicare publishes two amounts for every billed service:
+#
+# - **Submitted charge**: the provider's stated price (their
+#   "chargemaster" rate).
+# - **Allowed amount**: what Medicare's fee schedule permits — what
+#   they will actually pay (plus the patient's coinsurance).
+#
+# The ratio = submitted ÷ allowed. A ratio of `3.0` means the
+# provider submits charges three times what Medicare will pay. This
+# number rarely changes Medicare's own payment (Medicare ignores the
+# inflated portion), but it can affect secondary payers and
+# coordination-of-benefits calculations. It's a useful **review
+# signal** because providers with stable, conservative chargemasters
+# look different from providers whose submitted charges fluctuate
+# wildly above the fee schedule.
 
 # %%
 ratio = df["feat_charge_to_allowed"].dropna()
@@ -195,8 +410,50 @@ plt.show()
 # %% [markdown]
 # ### 5.2 Service Concentration (HHI)
 #
-# **What it catches**: "Mill" operations — providers billing overwhelmingly
-# from a single HCPCS code. Legitimate practices are diversified.
+# **Business Purpose** — Find providers whose billing is heavily
+# concentrated in one or two procedure codes — a pattern auditors
+# often want to verify is consistent with the provider's stated
+# specialty and practice model.
+#
+# **Plain-English Logic** — For each NPI, compute the
+# Herfindahl-Hirschman Index across the share of services in each
+# HCPCS code billed. HHI close to 1.0 = single procedure; HHI close
+# to 0 = highly diversified.
+#
+# **Expected Output** — A right-skewed distribution. Most providers
+# bill many procedures and sit at low HHI; a smaller tail clusters
+# above 0.5.
+#
+# **Why It Matters** — High-HHI providers are not inherently doing
+# anything wrong — many subspecialists legitimately bill almost
+# entirely from one code (e.g., a sleep-study reader). The HHI
+# feature is most informative when **combined** with specialty
+# context and other features in the composite score.
+#
+# **What to Check Before Moving On**
+# - Most mass of the histogram sits below 0.25.
+# - The vertical reference lines render at 0.25 and 0.50.
+#
+# ### Learning note — HHI / service concentration
+#
+# The Herfindahl-Hirschman Index is most commonly used in antitrust
+# to measure market concentration. We are reusing the same formula
+# on a single provider's procedure mix:
+#
+# ```
+# HHI = Σ (share_of_services_in_code_i) ²
+# ```
+#
+# - Bill 100 distinct codes equally → HHI ≈ 0.01 (very diversified).
+# - Bill 80% of services from one code → HHI ≈ 0.64 (very
+#   concentrated).
+#
+# Concentrated billing is a **review signal**, not a finding. Many
+# specialties legitimately concentrate. The signal becomes
+# interesting when, for example, a self-described general internist
+# has an HHI of 0.95 in a single high-cost code — at that point an
+# auditor may want to look at the actual records and policy
+# requirements.
 
 # %%
 # HHI distribution by unique provider
@@ -220,7 +477,45 @@ print(f"Providers with HHI > 0.50 (very high concentration): {n_very_high:,}")
 # %% [markdown]
 # ### 5.3 Composite Risk Score Distribution
 #
-# Weighted baseline combining all signals. Not a model — a sanity check.
+# **Business Purpose** — Combine the individual signal features into a
+# single ranked score so we can sort the worklist top-to-bottom.
+#
+# **Plain-English Logic** — A weighted sum of normalized features.
+# The weights are domain-informed but **not learned** — that is the
+# next notebook's job.
+#
+# **Expected Output** — A right-skewed distribution with the bulk of
+# providers near zero and a long tail. Plus a per-specialty count of
+# which specialties are over-represented in the top-1,000 risk tier.
+#
+# **Why It Matters** — This is the simplest possible "ranker" and
+# serves as a baseline for the supervised model in Notebook 03. If a
+# trained model can't beat this baseline, something is wrong with
+# the features, the labels, or the training setup.
+#
+# **What to Check Before Moving On**
+# - No NaNs in the visible histogram range.
+# - The top-risk specialty mix is plausible (durable medical
+#   equipment, high-utilization codes, etc. tend to surface — that
+#   is expected, not a finding).
+#
+# ### Learning note — the composite score is a baseline, not a model
+#
+# It is tempting to look at this score and treat it as "the answer."
+# It isn't. A composite risk score is a hand-weighted formula
+# combining features the analyst already believes are informative.
+# It has three big limitations:
+#
+# 1. **The weights are guesses.** They reflect the author's
+#    judgment, not data.
+# 2. **No interactions.** A trained model can learn that "high HHI
+#    is only interesting when the provider also has a high charge
+#    ratio AND a low-volume HCPCS code." A weighted sum cannot.
+# 3. **No calibration.** The output isn't a probability of
+#    anything — it's a ranking.
+#
+# Treat the composite as a **baseline** the supervised model in
+# Notebook 03 must beat. That is its real job.
 
 # %%
 risk = df["feat_composite_risk"].dropna()
@@ -254,7 +549,41 @@ plt.show()
 # ---
 # ## 6. Feature Correlation Matrix
 #
-# Validate features capture different audit signals (low cross-correlation).
+# **Business Purpose** — Confirm the features carry different
+# information, not many redundant restatements of the same signal.
+#
+# **Plain-English Logic** — Compute the pairwise correlation matrix
+# across all numeric features and visualize the lower triangle. Flag
+# pairs with |r| > 0.80 as candidates for dropping.
+#
+# **Expected Output** — A masked heatmap saved to
+# `reports/feature_correlations.png`, plus a printed list of
+# highly-correlated feature pairs (or a confirmation that none
+# exist).
+#
+# **Why It Matters** — Highly-correlated features inflate model
+# variance and waste compute without adding signal. They also make
+# downstream feature-importance analysis confusing.
+#
+# **What to Check Before Moving On**
+# - The heatmap renders without saturating (mostly soft colors, not
+#   a sea of deep red/blue).
+# - Any pair flagged at |r| > 0.80 is one you are willing to act on
+#   later (typically: keep one, drop the other before modeling).
+#
+# ### Learning note — what does a correlation matrix tell you?
+#
+# Correlation only measures **linear** association between two
+# features. Two features with `r ≈ 0.0` are not necessarily
+# independent — they may be related non-linearly. Two features
+# with `r ≈ 0.9` are essentially the same column with noise.
+#
+# A practical rule of thumb for audit features:
+#
+# - `|r| < 0.5` → distinct signals, keep both.
+# - `0.5 ≤ |r| < 0.8` → some overlap, but each may add value;
+#   defer the decision to model-time importance analysis.
+# - `|r| ≥ 0.8` → almost certainly redundant; pick one.
 
 # %%
 numeric_feats = [c for c in feat_cols if df[c].dtype in ["float32", "float64", "int64", "int32"]]
@@ -288,7 +617,40 @@ if numeric_feats:
 # ---
 # ## 7. Save Feature Set to Parquet
 #
-# Parquet preserves dtypes, compresses ~5x vs CSV, and loads 10x faster.
+# **Business Purpose** — Persist the feature-engineered dataframe so
+# downstream notebooks can load it instantly without re-running
+# `build_all_features`.
+#
+# **Plain-English Logic** — Write `df` to a Parquet file, then dump
+# the feature metadata (descriptions, weights) to a JSON sidecar.
+#
+# **Expected Output** — One `.parquet` and one `.json` file in
+# `data/processed/`, with their sizes printed.
+#
+# **Why It Matters** — Notebook 02 onward can read this file in
+# seconds. If it's missing or corrupt, every downstream step
+# breaks.
+#
+# **What to Check Before Moving On**
+# - The Parquet size is roughly one-fifth of the CSV equivalent.
+# - The JSON metadata file exists and parses cleanly.
+#
+# ### Learning note — why Parquet, not CSV?
+#
+# CSV is human-readable, but the wrong format for analytical data:
+#
+# - **Type-safe**: Parquet stores dtypes; CSV does not. A column
+#   that is `float32` here loads as `float32` in the next notebook
+#   automatically.
+# - **Compressed**: Parquet uses columnar compression (Snappy by
+#   default) — typically a 5–10× shrink versus CSV.
+# - **Fast**: Columnar layout means "read just these 5 columns"
+#   only touches those bytes on disk. Loads are often 10× faster.
+# - **Standard**: pandas, polars, DuckDB, Spark, BigQuery, and
+#   Athena all read Parquet natively.
+#
+# CSV is for handing data to humans. Parquet is for handing data
+# to your next notebook.
 
 # %%
 output_path = PATHS["data_processed"] / f"features_provider_service_{YEAR}.parquet"
@@ -310,14 +672,23 @@ print(f"✓ Metadata: {meta_path.name}")
 #
 # | Step | Result |
 # |------|--------|
-# | Features built | ~28 domain-informed audit signals |
+# | Features built | ~28 domain-informed audit-priority signals |
 # | Output format | Parquet (fast, compressed, type-safe) |
 # | Next notebook | 02_anomaly_detection.py (Isolation Forest, DBSCAN) |
 #
-# **Key insight for Machinify**: The ML is table stakes. The domain knowledge
-# that translates a charge-to-allowed ratio of 15:1 on a J-code billed from
-# POS 11 with an HHI of 0.9 into "this is almost certainly a scheme" — that's
-# what 11 years of OIG audit work gives you.
+# **Reminder of scope** — None of these features identifies fraud,
+# overpayment, or noncompliance. They produce a prioritized list of
+# **patterns that may warrant follow-up review**. Translating any
+# specific row into an actual audit conclusion requires
+# claims-level records, applicable CMS policy review, provider
+# context (subspecialty, group setting, patient mix), and the
+# professional judgment of a trained auditor.
+#
+# **Where the domain knowledge actually shows up** — Picking which
+# features to build in the first place, choosing peer groups, and
+# knowing which combinations of signals are worth a closer look
+# (rather than chasing every individual outlier) is the value an
+# experienced auditor adds on top of the math.
 
 # %%
 print(f"\n{'='*60}")
