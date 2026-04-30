@@ -1,0 +1,41 @@
+# Data files (large — recreated via download pipeline)
+data/raw/
+data/interim/
+data/processed/
+*.csv
+*.parquet
+*.h5
+
+# Saved models
+models/*.json
+models/*.txt
+models/*.pkl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated reports (regenerated from notebooks)
+reports/*.png
+reports/*.html

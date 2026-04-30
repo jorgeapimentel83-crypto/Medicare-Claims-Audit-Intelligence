@@ -1,0 +1,59 @@
+# Medicare Claims Audit Intelligence Platform
+# =============================================
+# conda env create -f environment.yml
+# conda activate medicare-audit
+#
+# RAPIDS requires CUDA 12.x — verify with: nvidia-smi
+# RTX 5080 needs RAPIDS 24.12+ for Blackwell/Ada support
+
+name: medicare-audit
+channels:
+  - rapidsai
+  - conda-forge
+  - nvidia
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+
+  # --- RAPIDS GPU Acceleration ---
+  - cudf=24.12           # GPU DataFrames (replaces pandas for large data)
+  - cuml=24.12           # GPU ML: DBSCAN, UMAP, Isolation Forest
+  - cupy                 # GPU arrays (NumPy on CUDA)
+  - rmm                  # RAPIDS Memory Manager
+
+  # --- Core Data ---
+  - pandas>=2.1
+  - numpy>=1.24
+  - pyarrow>=14.0        # Parquet I/O
+  - scipy>=1.11
+  - pyyaml>=6.0
+
+  # --- ML / Gradient Boosting ---
+  - scikit-learn>=1.3
+  - xgboost>=2.0         # GPU tree_method='cuda' built-in
+  - lightgbm>=4.1        # GPU builds available via conda
+
+  # --- Visualization ---
+  - matplotlib>=3.8
+  - seaborn>=0.13
+  - plotly>=5.18
+
+  # --- Notebooks ---
+  - jupyterlab>=4.0
+  - ipywidgets>=8.1
+  - jupytext             # .py ↔ .ipynb conversion
+
+  # --- Utilities ---
+  - requests>=2.31
+  - tqdm>=4.66
+  - loguru>=0.7
+  - rich>=13.7
+
+  # --- Testing ---
+  - pytest>=7.4
+  - pytest-cov>=4.1
+
+  - pip:
+    - aiohttp>=3.9       # Async downloads (not in conda-forge)
