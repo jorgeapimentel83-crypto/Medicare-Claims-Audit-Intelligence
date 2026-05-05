@@ -1,16 +1,16 @@
 # Medicare Claims Audit Intelligence Platform
 
-**GPU-accelerated anomaly detection and audit targeting for Medicare Part B claims**
+**GPU-accelerated anomaly detection and audit-priority ranking for Medicare Part B claims**
 
-Built by a federal healthcare auditor (HHS/OIG, ~11 years) to demonstrate how deep domain knowledge of claims audit red flags translates into machine learning features that surface high-value audit targets from public CMS data at population scale.
+Built by a federal healthcare auditor (HHS/OIG, ~11 years) to demonstrate how domain knowledge of audit-priority billing patterns can be translated into machine learning features that surface unusual billing behavior from public CMS data at population scale. Outputs are public-data decision-support signals — they do not identify fraud, overpayments, or noncompliance.
 
 ---
 
 ## Problem Statement
 
-Medicare Part B pays ~$250B annually to 1.2M+ providers across 6,000+ HCPCS procedure codes. OIG and CMS audit teams must prioritize limited resources against millions of claim lines. Traditional audit selection relies on manual referral and rules-based filters that miss complex patterns.
+Medicare Part B pays ~$250B annually to 1.2M+ providers across 6,000+ HCPCS procedure codes. Audit teams must prioritize limited review capacity against millions of claim lines, and rules-based filters alone miss combined or contextual patterns.
 
-This platform applies gradient-boosted ensemble models and Monte Carlo simulation to rank providers by audit-worthiness using the same red flags experienced federal auditors look for — but across the entire provider population simultaneously.
+This platform applies gradient-boosted ensemble models and Monte Carlo simulation to rank providers by audit-priority across the entire provider population, using domain-informed review signals rather than manual referral alone. Rankings are a starting point for review, not findings.
 
 ## Architecture
 
@@ -23,14 +23,14 @@ This platform applies gradient-boosted ensemble models and Monte Carlo simulatio
                             │  download_data.py → load_data.py
 ┌───────────────────────────▼─────────────────────────────────────┐
 │                   FEATURE ENGINEERING                           │
-│  Domain-informed audit signals (features.py):                   │
-│  • Charge-to-allowed ratio → billing aggressiveness             │
+│  Domain-informed audit-priority signals (features.py):          │
+│  • Charge-to-allowed ratio → submitted vs allowed ratio         │
 │  • Peer specialty z-scores → outlier vs peers                   │
-│  • Herfindahl index → service concentration / "mills"           │
-│  • Services-per-beneficiary → unbundling / phantom billing      │
-│  • Place-of-service patterns → facility-rate upcoding           │
+│  • Herfindahl index → service-mix concentration                 │
+│  • Services-per-beneficiary → utilization-pattern outliers      │
+│  • Place-of-service patterns → unusual facility/office mix      │
 │  • Drug revenue share → J-code concentration                    │
-│  • Geographic deviation → regional outlier detection             │
+│  • Geographic deviation → regional outlier detection            │
 └───────────────────────────┬─────────────────────────────────────┘
                             │  features.py
 ┌───────────────────────────▼─────────────────────────────────────┐
@@ -43,9 +43,9 @@ This platform applies gradient-boosted ensemble models and Monte Carlo simulatio
                             │  evaluation.py
 ┌───────────────────────────▼─────────────────────────────────────┐
 │                      OUTPUT LAYER                               │
-│  Provider audit priority rankings with confidence intervals     │
+│  Provider audit-priority rankings with confidence intervals     │
 │  Specialty-level benchmarking visualizations                    │
-│  Estimated recoverable overpayments (Monte Carlo bands)         │
+│  Illustrative recovery-potential ranges (Monte Carlo bands)     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -94,7 +94,7 @@ medicare-claims-audit-intelligence/
 │   ├── features.py                 # Domain-informed audit feature builders
 │   ├── modeling.py                 # XGBoost + LightGBM GPU ensemble
 │   ├── evaluation.py               # Audit-specific metrics (precision@k, AUCPR)
-│   └── simulation.py               # Monte Carlo overpayment estimation
+│   └── simulation.py               # Monte Carlo recovery-potential simulation
 ├── models/                         # Saved model artifacts
 ├── reports/                        # Generated plots and analysis
 ├── outputs/                        # Final deliverables
@@ -121,13 +121,13 @@ jupyter lab notebooks/01_eda_feature_engineering.py
 
 ## Domain Expertise → Feature Engineering
 
-The value proposition isn't the algorithms — any ML engineer can run XGBoost. The differentiator is knowing *which features to build and why*. Every feature in `src/features.py` maps to a specific audit red flag pattern from real OIG investigations:
+The value proposition isn't the algorithms — the differentiator is knowing *which features to build and why*. Every feature in `src/features.py` maps to an audit-priority pattern auditors commonly use to prioritize where to look first when working from public CMS summary data. Each feature is a public-data decision-support signal — it does not, on its own, indicate wrongdoing.
 
-| Feature | Audit Pattern | Real-World Example |
-|---------|--------------|-------------------|
-| Charge-to-Allowed Ratio | Inflated billing | DME supplier charging $3,000 for a $150 knee brace |
-| Peer Specialty Z-Score | Outlier vs peers | "Doc shop" seeing 80+ patients/day with cookie-cutter 99214s |
-| HHI Concentration | Service mill | Pain clinic billing 90% facet joint injections (64493-64495) |
-| Services/Beneficiary | Unbundling | Lab billing 20+ tests per encounter, clinical need supports 3-4 |
-| Facility Ratio | POS upcoding | Billing facility rates (POS 22) for office-rendered services |
-| Drug Revenue Share | J-code concentration | Oncologist with 80% revenue from single chemotherapy drug |
+| Feature | Audit-Priority Pattern | Illustrative Example |
+|---------|------------------------|----------------------|
+| Charge-to-Allowed Ratio | Unusually high submitted-vs-allowed multiple | DME supplier with submitted charges of $3,000 against a $150 allowed amount |
+| Peer Specialty Z-Score | Outlier vs same-specialty peers | High-throughput practice with E&M (99214) volume well above specialty median |
+| HHI Concentration | Highly concentrated service mix | Pain practice with ~90% of revenue from facet-joint injections (64493-64495) |
+| Services/Beneficiary | Unusual services-per-patient volume | Lab with services-per-encounter well above the typical clinical pattern |
+| Facility Ratio | Unusual facility/office POS mix for the specialty | High share of facility-rate (POS 22) lines in an otherwise office-based specialty |
+| Drug Revenue Share | High J-code concentration | Oncology practice with most revenue from a single Part B drug code |

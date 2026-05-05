@@ -166,9 +166,9 @@ qr = quality_report(df, f"Provider-Service {YEAR}")
 # **Expected Output** — Several hundred thousand to ~1M unique NPIs,
 # thousands of distinct HCPCS codes, ~50 states/territories.
 #
-# **Why It Matters** — If unique NPIs is suspiciously low, the file may
-# be truncated. If state count is 1, you may be looking at a
-# single-state extract rather than the national file.
+# **Why It Matters** — If the unique-NPI count looks unexpectedly low,
+# the file may be truncated. If state count is 1, you may be looking at
+# a single-state extract rather than the national file.
 #
 # **What to Check Before Moving On**
 # - Entity mix is roughly the expected `I` (individual) heavy split.
@@ -327,7 +327,7 @@ print(f"\n✓ {len(feat_cols)} features built")
 # goal is to confirm each one has a reasonable distribution shape — not
 # to draw conclusions about any specific provider.
 #
-# ### 5.1 Billing Aggressiveness (Charge-to-Allowed Ratio)
+# ### 5.1 Charge-to-Allowed Ratio
 #
 # **Business Purpose** — Surface providers whose submitted charges are
 # unusually high relative to what Medicare allows for the same
@@ -385,7 +385,7 @@ axes[0].axvline(ratio.quantile(0.95), color=AUDIT_PALETTE[3], linestyle="--", lw
                 label=f"95th pctl: {ratio.quantile(0.95):.2f}")
 axes[0].set_xlabel("Charge-to-Allowed Ratio")
 axes[0].set_ylabel("Frequency")
-axes[0].set_title("Billing Aggressiveness Distribution")
+axes[0].set_title("Charge-to-Allowed Ratio Distribution")
 axes[0].legend()
 
 # By specialty
@@ -400,7 +400,7 @@ axes[1].barh(range(len(spec_med)), spec_med.values, color=AUDIT_PALETTE[0], alph
 axes[1].set_yticks(range(len(spec_med)))
 axes[1].set_yticklabels(spec_med.index, fontsize=9)
 axes[1].set_xlabel("Median Charge-to-Allowed Ratio")
-axes[1].set_title("Billing Aggressiveness by Specialty")
+axes[1].set_title("Median Charge-to-Allowed Ratio by Specialty")
 axes[1].invert_yaxis()
 
 plt.tight_layout()

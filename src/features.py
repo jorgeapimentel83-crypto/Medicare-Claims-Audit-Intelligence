@@ -1,19 +1,22 @@
 """
 Medicare Claims Audit — Domain-Informed Feature Engineering
 =============================================================
-Every feature maps to a real audit red flag from OIG investigations.
+Every feature maps to an audit-priority pattern commonly used to
+prioritize where reviewers look first when working from public CMS
+summary data. These are public-data decision-support features — they
+do not identify fraud, overpayments, or noncompliance.
 
-The value isn't in the algorithms — it's in knowing WHICH features to build.
-Any ML engineer can run XGBoost. Knowing that a charge-to-allowed ratio of
-15:1 on a J-code billed from POS 11 with an HHI of 0.9 is almost certainly
-fraud... that takes a decade of audit experience.
+The value here isn't in the algorithms — it's in knowing which features
+to build. Recognizing that a charge-to-allowed ratio of 15:1 on a J-code
+billed from POS 11 with an HHI of 0.9 is the kind of combined pattern
+that may warrant follow-up review draws on years of audit experience.
 
 Usage:
     from src.features import build_all_features
     df = build_all_features(df_provider_service)
 
 Feature Categories:
-    1. Billing Aggressiveness   — charge-to-allowed ratio
+    1. Charge-to-Allowed Ratio  — submitted charge vs allowed amount
     2. Peer Specialty Deviation — z-scores vs peer group
     3. Service Concentration    — Herfindahl-Hirschman Index
     4. Volume Anomaly           — services per beneficiary
@@ -35,18 +38,20 @@ log = logging.getLogger(__name__)
 
 
 # ===================================================================
-# Feature 1: Charge-to-Allowed Ratio (Billing Aggressiveness)
+# Feature 1: Charge-to-Allowed Ratio
 # ===================================================================
-# AUDIT SIGNAL: Ratio of what a provider submits vs what Medicare allows.
-# Normal range is 1.5-4x (most providers mark up above fee schedule).
-# Ratios of 10x+ are red flags for inflated charges that affect
-# secondary payer calculations, patient liability, and MSP recoveries.
+# REVIEW SIGNAL: Ratio of what a provider submits vs what Medicare allows.
+# Typical range is 1.5-4x (most providers mark up above fee schedule).
+# Ratios of 10x+ are unusual billing behavior worth a closer look — this
+# can affect secondary payer calculations, patient liability, and MSP
+# recoveries. Out-of-network billing and chargemaster effects can also
+# produce high ratios for legitimate reasons.
 #
-# REAL CASE: DME suppliers billing $3,000 for $150 knee braces.
-#            The charge-to-allowed ratio would be 20:1.
+# Illustrative example: DME suppliers submitting charges of $3,000 for
+# items with a $150 allowed amount would produce a 20:1 ratio.
 # ===================================================================
 def charge_to_allowed_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute billing aggressiveness signals."""
+    """Compute charge-to-allowed ratio signals (audit-priority feature)."""
     df = df.copy()
 
     mask = df["Avg_Mdcr_Alowd_Amt"] > 0
@@ -59,7 +64,7 @@ def charge_to_allowed_features(df: pd.DataFrame) -> pd.DataFrame:
         df["feat_charge_to_allowed"].clip(lower=0)
     )
 
-    # Binary flag: extreme billing aggressiveness
+    # Binary flag: charge-to-allowed ratio above the configured outlier percentile
     pctl = FEATURE_PARAMS["charge_ratio"]["outlier_percentile"]
     threshold = df["feat_charge_to_allowed"].quantile(pctl)
     df["feat_extreme_billing"] = (df["feat_charge_to_allowed"] > threshold).astype(int)
@@ -70,12 +75,15 @@ def charge_to_allowed_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===================================================================
 # Feature 2: Peer Specialty Deviation (Z-Scores)
 # ===================================================================
-# AUDIT SIGNAL: How far does this provider deviate from specialty peers?
+# REVIEW SIGNAL: How far does this provider deviate from specialty peers?
 # A dermatologist performing 10x the skin biopsies of peer dermatologists
-# is suspicious even if each individual claim looks fine.
+# is an unusual billing pattern that may warrant follow-up review, even
+# if each individual claim looks fine.
 #
-# REAL CASE: "Doc shops" churning 80+ patients/day with cookie-cutter
-#            E&M codes, billing 99214/99215 at rates 5x specialty median.
+# Illustrative example: high-throughput practices billing E&M codes
+# (99214/99215) at rates 5x the specialty median surface as outliers
+# under this signal — context determines whether the pattern is
+# legitimate (panel mix, subspecialty) or worth a closer look.
 # ===================================================================
 def peer_deviation_features(df: pd.DataFrame) -> pd.DataFrame:
     """Z-scores of key metrics vs same-specialty peer group."""
@@ -108,19 +116,21 @@ def peer_deviation_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===================================================================
 # Feature 3: Service Concentration (Herfindahl-Hirschman Index)
 # ===================================================================
-# AUDIT SIGNAL: Revenue concentration across HCPCS codes. Legitimate
-# practices have diversified service mixes. A provider billing 90% of
-# revenue from a single code is a "mill" pattern.
+# REVIEW SIGNAL: Revenue concentration across HCPCS codes. Most
+# practices have diversified service mixes; a provider with 90% of
+# revenue from a single code shows a highly concentrated billing
+# pattern. Many subspecialists legitimately concentrate, so this is
+# only informative in combination with specialty context.
 #
-# REAL CASE: Pain management clinics billing almost exclusively for
-#            facet joint injections (64493-64495) or trigger point
-#            injections (20552-20553).
+# Illustrative example: pain management practices that bill almost
+# exclusively for facet joint injections (64493-64495) or trigger
+# point injections (20552-20553) appear at the high end of HHI.
 #
 # HHI interpretation:
-#   0.00 - 0.15 : Diversified (normal)
+#   0.00 - 0.15 : Diversified
 #   0.15 - 0.25 : Moderate concentration
-#   0.25 - 0.50 : High concentration (investigate)
-#   0.50 - 1.00 : Very high concentration (red flag)
+#   0.25 - 0.50 : High concentration (may warrant follow-up review)
+#   0.50 - 1.00 : Very high concentration (audit-priority pattern)
 # ===================================================================
 def service_concentration_features(df: pd.DataFrame) -> pd.DataFrame:
     """Herfindahl-Hirschman Index of HCPCS revenue concentration per provider."""
@@ -161,11 +171,14 @@ def service_concentration_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===================================================================
 # Feature 4: Volume Anomaly (Services per Beneficiary)
 # ===================================================================
-# AUDIT SIGNAL: How many services per unique patient? Extreme values
-# suggest unbundling, overutilization, or phantom billing.
+# REVIEW SIGNAL: How many services per unique patient? Extreme values
+# can be associated with unbundling or overutilization patterns and
+# may warrant follow-up review. High values can also reflect
+# legitimate panel mix or subspecialty practice.
 #
-# REAL CASE: Labs billing 20+ tests per patient encounter when the
-#            clinical indication supports 3-4 tests.
+# Illustrative example: lab providers billing 20+ tests per patient
+# encounter where the clinical indication typically supports fewer
+# tests would surface as outliers under this signal.
 # ===================================================================
 def volume_anomaly_features(df: pd.DataFrame) -> pd.DataFrame:
     """Services per beneficiary at line and provider levels."""
@@ -207,10 +220,11 @@ def volume_anomaly_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===================================================================
 # Feature 5: Place of Service Patterns
 # ===================================================================
-# AUDIT SIGNAL: Facility rates (POS 22 = outpatient hospital) are
+# REVIEW SIGNAL: Facility rates (POS 22 = outpatient hospital) are
 # typically ~60% higher than non-facility rates (POS 11 = office) for
-# the same procedure. Providers billing facility rates for office work
-# are upcoding place of service.
+# the same procedure. Providers whose facility/non-facility mix looks
+# unusual for their specialty may warrant follow-up review of the
+# place-of-service codes used.
 #
 # Key POS codes:
 #   F/22 = Outpatient Hospital (facility rate)
@@ -250,10 +264,11 @@ def pos_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===================================================================
 # Feature 6: Payment Variance
 # ===================================================================
-# AUDIT SIGNAL: Large gaps between submitted, allowed, and paid amounts.
-# Also: standardized payment ratio reveals geographic cost adjustments.
-# Providers in low-cost areas billing at high-cost-area rates may be
-# gaming geographic payment adjustments (GPCI manipulation).
+# REVIEW SIGNAL: Large gaps between submitted, allowed, and paid amounts.
+# Also: the standardized-vs-raw payment ratio reflects geographic cost
+# adjustments. Providers whose geographic payment profile looks unusual
+# relative to their location may warrant follow-up review of GPCI
+# locality assignments.
 # ===================================================================
 def payment_variance_features(df: pd.DataFrame) -> pd.DataFrame:
     """Payment gap, payment rate, and standardization variance."""
@@ -284,13 +299,14 @@ def payment_variance_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===================================================================
 # Feature 7: Drug Billing Concentration
 # ===================================================================
-# AUDIT SIGNAL: Part B drugs (~$40B/year) are a top OIG priority.
-# HCPCS J-codes represent injectable/infused drugs administered in
-# clinical settings. High drug revenue concentration suggests:
-#   - Average Sales Price (ASP) inflation schemes
-#   - Billing for non-administered drugs
-#   - Off-label use patterns
-#   - Buy-and-bill markup gaming
+# REVIEW SIGNAL: Part B drugs (~$40B/year) are a long-standing OIG
+# focus area. HCPCS J-codes represent injectable/infused drugs
+# administered in clinical settings. High drug revenue concentration
+# is an audit-priority pattern that may warrant follow-up review for:
+#   - Average Sales Price (ASP) reporting accuracy
+#   - Documentation of administered drugs
+#   - Off-label use considerations
+#   - Buy-and-bill markup behavior
 # ===================================================================
 def drug_features(df: pd.DataFrame) -> pd.DataFrame:
     """Drug billing concentration and J-code features."""
@@ -320,9 +336,11 @@ def drug_features(df: pd.DataFrame) -> pd.DataFrame:
 # ===================================================================
 # Feature 8: Geographic Deviation
 # ===================================================================
-# AUDIT SIGNAL: Provider metrics compared to state-level benchmarks.
-# A provider in rural Texas billing at Manhattan rates is suspicious.
-# This requires the geographic benchmark dataset (geo_service).
+# REVIEW SIGNAL: Provider metrics compared to state-level benchmarks.
+# A provider whose submitted charges deviate sharply from state-level
+# medians is an unusual billing pattern that may warrant follow-up
+# review. This optionally uses a geographic benchmark dataset
+# (geo_service); otherwise benchmarks are computed from the input.
 # ===================================================================
 def geographic_deviation_features(
     df: pd.DataFrame,
@@ -366,15 +384,16 @@ def geographic_deviation_features(
 
 
 # ===================================================================
-# Feature 9: Entity Type Interaction
+# Feature 9: Entity Type Indicators
 # ===================================================================
-# AUDIT SIGNAL: Individual providers (Ent_Cd = "I") and organizations
-# (Ent_Cd = "O") have very different billing norms. Some features
-# interact with entity type — e.g., high HHI is more normal for an
-# individual specialist than for a large group practice.
+# REVIEW SIGNAL: Individual providers (Ent_Cd = "I") and organizations
+# (Ent_Cd = "O") have different billing norms — e.g., high HHI is more
+# typical for an individual specialist than for a large group practice.
+# Downstream models can use these indicators to learn entity-aware
+# behavior; this builder produces indicators only.
 # ===================================================================
 def entity_type_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Entity type encoding and interaction features."""
+    """Entity type and Medicare-participation indicator features."""
     df = df.copy()
 
     df["feat_is_organization"] = (df["Rndrng_Prvdr_Ent_Cd"] == "O").astype(int)
@@ -387,14 +406,16 @@ def entity_type_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ===================================================================
-# Composite Audit Risk Score (Unsupervised Baseline)
+# Composite Audit-Priority Score (Unsupervised Baseline)
 # ===================================================================
 # This is NOT a model — it's a simple weighted percentile-rank composite
-# that serves as a sanity check. If known-bad providers don't score high
-# on this, the features need rethinking.
+# that serves as a baseline ranking. It blends the individual review
+# signals into a single ordering for prioritization. If providers known
+# to be of audit interest do not rank high on this, the underlying
+# features likely need rethinking.
 # ===================================================================
 def composite_risk_score(df: pd.DataFrame) -> pd.DataFrame:
-    """Weighted composite of all risk signals (baseline, not a model)."""
+    """Weighted composite of audit-priority signals (baseline, not a model)."""
     df = df.copy()
 
     weights = {
@@ -441,7 +462,7 @@ def build_all_features(
     df_geo: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
-    Apply all domain-informed audit feature builders in sequence.
+    Apply all domain-informed audit-priority feature builders in sequence.
 
     Parameters
     ----------
@@ -456,7 +477,7 @@ def build_all_features(
         Input DataFrame with ~25 new feature columns prefixed 'feat_'.
     """
     pipeline = [
-        ("Billing Aggressiveness", lambda d: charge_to_allowed_features(d)),
+        ("Charge-to-Allowed Ratio", lambda d: charge_to_allowed_features(d)),
         ("Peer Specialty Deviation", lambda d: peer_deviation_features(d)),
         ("Service Concentration (HHI)", lambda d: service_concentration_features(d)),
         ("Volume Anomaly", lambda d: volume_anomaly_features(d)),
@@ -465,10 +486,10 @@ def build_all_features(
         ("Drug Billing Concentration", lambda d: drug_features(d)),
         ("Geographic Deviation", lambda d: geographic_deviation_features(d, df_geo)),
         ("Entity Type", lambda d: entity_type_features(d)),
-        ("Composite Risk Score", lambda d: composite_risk_score(d)),
+        ("Composite Audit-Priority Score", lambda d: composite_risk_score(d)),
     ]
 
-    log.info("Building audit features...")
+    log.info("Building audit-priority features...")
     for name, func in pipeline:
         log.info(f"  → {name}")
         df = func(df)
@@ -482,11 +503,11 @@ def build_all_features(
 
 
 def get_feature_metadata() -> dict:
-    """Return feature names, descriptions, and audit rationale."""
+    """Return feature names, descriptions, and audit-priority rationale."""
     return {
-        "feat_charge_to_allowed": "Ratio of submitted charge to Medicare allowed amount (billing aggressiveness)",
+        "feat_charge_to_allowed": "Ratio of submitted charge to Medicare allowed amount (charge-to-allowed ratio)",
         "feat_log_charge_ratio": "Log-transformed charge-to-allowed ratio (stabilized for models)",
-        "feat_extreme_billing": "Binary flag: charge ratio above 95th percentile",
+        "feat_extreme_billing": "Binary flag: charge-to-allowed ratio above the configured outlier percentile",
         "feat_zscore_sbmtd_chrg": "Z-score of avg submitted charge vs specialty peers",
         "feat_zscore_mdcr_pymt_amt": "Z-score of avg Medicare payment vs specialty peers",
         "feat_zscore_srvcs": "Z-score of total services vs specialty peers",
@@ -512,5 +533,5 @@ def get_feature_metadata() -> dict:
         "feat_is_organization": "Binary: provider is an organization (vs individual)",
         "feat_is_individual": "Binary: provider is an individual",
         "feat_is_participating": "Binary: Medicare participating provider",
-        "feat_composite_risk": "Weighted composite of all risk signals (baseline score)",
+        "feat_composite_risk": "Weighted composite of audit-priority signals (baseline score, not a model)",
     }
