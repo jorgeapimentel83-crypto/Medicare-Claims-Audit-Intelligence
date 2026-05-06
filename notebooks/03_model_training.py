@@ -360,6 +360,14 @@ try:
     neg_count = int(len(y_train) - pos_count)
     scale_pos_weight = neg_count / max(pos_count, 1)
 
+    # GPU portability note:
+    # This notebook intentionally uses CPU-compatible tree_method="hist"
+    # so the portfolio runs reproducibly on machines without a GPU.
+    # A later performance-tuning notebook can enable GPU acceleration
+    # (e.g. tree_method="gpu_hist" or device="cuda") on compatible
+    # hardware. We do not force GPU here because portability across
+    # reviewer machines matters more than training speed for a
+    # baseline-modeling notebook.
     xgb_model = XGBClassifier(
         n_estimators=300,
         max_depth=4,
@@ -426,6 +434,13 @@ lgb_probs = None
 try:
     from lightgbm import LGBMClassifier
 
+    # num_leaves note:
+    # We use num_leaves=31 as a conservative first-pass LightGBM setting
+    # for this baseline notebook. A later performance-tuning notebook can
+    # compare more aggressive values against the settings in
+    # src/config.py. The goal of Notebook 03 is leakage-safe baseline
+    # modeling, not final hyperparameter optimization, so we keep this
+    # value stable for now to make run-to-run comparisons clean.
     lgb_model = LGBMClassifier(
         n_estimators=300,
         num_leaves=31,
@@ -774,6 +789,16 @@ else:
 
 test_index = X_test.index
 
+# Index alignment safety check:
+# train_test_split preserves the original pandas index on X_test and
+# y_test, so X_test.index points back at exactly the same rows in
+# provider_df that y_test came from. The assertion below is a cheap
+# guard that confirms the held-out provider rows still align with the
+# y_test labels before we glue probabilities onto identifiers.
+assert len(test_index) == len(y_test), (
+    "Index length mismatch between test features and target."
+)
+
 predictions_df = provider_df.loc[test_index, [
     "Rndrng_NPI",
     "provider_type",
@@ -796,7 +821,172 @@ print("Rows saved:", f"{len(predictions_df):,}")
 print("Columns saved:", list(predictions_df.columns))
 
 # %%
-# Step 13 — Notebook Summary
+# Step 13 — Full-Population Audit-Priority Scoring
+#
+# Business Purpose:
+# Produce one model-predicted audit-priority score per provider for the
+# entire 2022 Medicare Part B population, not just the held-out test
+# set. Downstream artifacts (financial review-cost simulations, state
+# and specialty rollups, dashboards) need scores for every provider in
+# the file, including those used to fit the model.
+#
+# Plain-English Logic:
+# We call predict_proba on the full feature matrix X for each model
+# that successfully trained:
+#   - Logistic Regression (always available)
+#   - XGBoost (if installed and trained)
+#   - LightGBM (if installed and trained)
+# We then attach those probabilities to the provider identifier
+# columns (Rndrng_NPI, provider_type, provider_state) and the weak
+# label, and persist the result as parquet for downstream use.
+#
+# Important Framing:
+# These are model-predicted audit-priority scores, not fraud scores,
+# overpayment scores, noncompliance findings, or audit findings. They
+# are research signals derived from public CMS Medicare Part B data
+# and the weak-supervision label from Notebook 02.
+#
+# Note on in-sample scoring:
+# Because X includes rows the models trained on, scores for those
+# specific providers are in-sample and will look optimistic relative
+# to held-out performance. The honest performance numbers are the
+# test-set metrics in Step 9 / Step 12. The full-population file
+# exists to provide a complete worklist, not to re-evaluate accuracy.
+#
+# Expected Output:
+# A parquet file at:
+#   data/processed/model_predictions_full_population_<YEAR>.parquet
+# with columns:
+#   Rndrng_NPI, provider_type, provider_state,
+#   weak_label_high_audit_priority,
+#   lr_full_probability,
+#   xgb_full_probability (if XGBoost trained),
+#   lgb_full_probability (if LightGBM trained)
+#
+# Why It Matters:
+# The test-set prediction file (Step 12) is for model evaluation.
+# Downstream simulations and rollups need a score for every provider,
+# which is what this step produces. Keeping the two files separate
+# preserves a clean evaluation artifact while still supporting full
+# population analytics.
+#
+# What to Check Before Moving On:
+# - Row count equals provider_df row count
+# - All probability columns are within [0, 1]
+# - Identifier columns match provider_df exactly (no row reordering)
+
+full_population_df = provider_df[[
+    "Rndrng_NPI",
+    "provider_type",
+    "provider_state",
+    target_col,
+]].copy()
+
+full_population_df["lr_full_probability"] = lr_pipeline.predict_proba(X)[:, 1]
+
+if xgb_model is not None:
+    full_population_df["xgb_full_probability"] = xgb_model.predict_proba(X)[:, 1]
+
+if lgb_model is not None:
+    full_population_df["lgb_full_probability"] = lgb_model.predict_proba(X)[:, 1]
+
+full_population_path = (
+    PATHS["data_processed"] / f"model_predictions_full_population_{YEAR}.parquet"
+)
+full_population_df.to_parquet(full_population_path, engine="pyarrow", index=False)
+
+print("Saved:", full_population_path)
+print("Rows saved:", f"{len(full_population_df):,}")
+print("Columns saved:", list(full_population_df.columns))
+print(
+    "Reminder: these are model-predicted audit-priority scores, not "
+    "fraud, overpayment, noncompliance, or audit-finding scores."
+)
+
+# %%
+# Step 14 — Save Best Model and Metadata
+#
+# Business Purpose:
+# Persist the single best-performing model from Step 9's comparison so
+# downstream code (scoring scripts, simulation notebooks, future
+# notebooks) can load it without retraining.
+#
+# Plain-English Logic:
+# We pick the row at the top of results_df (already sorted by Average
+# Precision descending in Step 9) and serialize the matching fitted
+# estimator with joblib:
+#   - Logistic Regression  -> save lr_pipeline (the full Pipeline so
+#                             the StandardScaler is included)
+#   - XGBoost              -> save xgb_model
+#   - LightGBM             -> save lgb_model
+# Alongside the model we save a small JSON metadata file describing
+# the target column, feature list, evaluation metrics, and an explicit
+# note that the target is a weak-supervision audit-priority label —
+# not a fraud, overpayment, noncompliance, or audit finding label.
+#
+# Expected Output:
+# - models/best_model_<YEAR>.joblib
+# - models/best_model_<YEAR>_metadata.json
+#
+# Why It Matters:
+# Saving the model decouples training from scoring. Later work can
+# reload the exact estimator that produced the reported metrics
+# without rerunning any of the training cells. The metadata file
+# preserves the framing language so anyone reusing the model is
+# reminded of what the target really is.
+#
+# What to Check Before Moving On:
+# - The joblib file exists and is non-empty
+# - The metadata JSON lists the same number of features used in
+#   training (len(feature_cols))
+# - best_model_name matches results_df.iloc[0]["model"]
+
+import json
+import joblib
+
+PATHS["models"].mkdir(parents=True, exist_ok=True)
+
+best_row_for_save = results_df.iloc[0]
+best_model_name = str(best_row_for_save["model"])
+
+if best_model_name == "Logistic Regression":
+    best_estimator = lr_pipeline
+elif best_model_name == "XGBoost":
+    best_estimator = xgb_model
+elif best_model_name == "LightGBM":
+    best_estimator = lgb_model
+else:
+    best_estimator = lr_pipeline
+
+best_model_path = PATHS["models"] / f"best_model_{YEAR}.joblib"
+joblib.dump(best_estimator, best_model_path)
+
+best_model_metadata = {
+    "best_model_name": best_model_name,
+    "target_column": target_col,
+    "number_of_features": int(len(feature_cols)),
+    "feature_columns": list(feature_cols),
+    "target_prevalence": float(y.mean()),
+    "average_precision": float(best_row_for_save["average_precision"]),
+    "roc_auc": float(best_row_for_save["roc_auc"]),
+    "note": (
+        "The target is a weak-supervision audit-priority label, not a "
+        "fraud, overpayment, noncompliance, or audit finding label."
+    ),
+}
+
+best_model_metadata_path = PATHS["models"] / f"best_model_{YEAR}_metadata.json"
+with open(best_model_metadata_path, "w", encoding="utf-8") as f:
+    json.dump(best_model_metadata, f, indent=2)
+
+print("Saved best model     :", best_model_path)
+print("Saved best metadata  :", best_model_metadata_path)
+print("Best model name      :", best_model_name)
+print("Average Precision    :", round(best_model_metadata["average_precision"], 4))
+print("ROC AUC              :", round(best_model_metadata["roc_auc"], 4))
+
+# %%
+# Step 15 — Notebook Summary
 #
 # Business Purpose:
 # Print a short, copy-pasteable summary of the run so the notebook ends
@@ -829,7 +1019,10 @@ print(f"  Lift@100                      : {best_row['lift_at_100']:.2f}x")
 print(f"Features used                   : {len(feature_cols)}")
 print(f"Target prevalence (all rows)    : {float(y.mean()):.5f}")
 print(f"Target prevalence (test set)    : {float(y_test.mean()):.5f}")
-print(f"Predictions saved to            : {predictions_path}")
+print(f"Test predictions saved to       : {predictions_path}")
+print(f"Full-population scores saved to : {full_population_path}")
+print(f"Best model saved to             : {best_model_path}")
+print(f"Best-model metadata saved to    : {best_model_metadata_path}")
 print("=" * 60)
 print(
     "Reminder: weak_label_high_audit_priority is a research signal "
