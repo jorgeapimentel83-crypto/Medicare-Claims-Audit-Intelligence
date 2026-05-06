@@ -39,3 +39,4 @@ Thumbs.db
 # Generated reports (regenerated from notebooks)
 reports/*.png
 reports/*.html
+models/*.joblib
