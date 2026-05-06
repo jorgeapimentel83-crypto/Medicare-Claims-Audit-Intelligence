@@ -10,10 +10,12 @@ Built by a federal healthcare auditor (HHS/OIG, ~11 years) to demonstrate how do
 
 | Notebook | Status | Description |
 |----------|--------|-------------|
-| 01 — EDA and Domain-Informed Feature Engineering | ✅ Complete | Builds 121 provider-level audit-priority features from CMS Part B data |
-| 02 — Provider-Level Anomaly Detection and Weak Supervision | ✅ Complete | Isolation Forest scoring, weak-supervision audit-priority labels, LEIE cross-reference |
-| 03 — Supervised Model Training (XGBoost / LightGBM) | ✅ Complete | Leakage-controlled supervised models trained on the weak-supervision label |
-| 04 — Monte Carlo Audit Recovery / Scenario Simulation | ⏳ Planned | Capacity, recovery scenarios, and prioritization tradeoffs from full-population scores |
+| 01 — EDA and Domain-Informed Feature Engineering | ✅ Complete (sample) | Builds ~28 provider-service-level audit-priority features from CMS Part B data |
+| 02 — Provider-Level Anomaly Detection and Weak Supervision | ✅ Complete (sample) | Aggregates service-level features into 121 provider-level columns; Isolation Forest scoring, weak-supervision audit-priority labels, LEIE cross-reference |
+| 03 — Supervised Model Training (XGBoost / LightGBM) | ✅ Complete (sample) | Leakage-controlled supervised models trained on the weak-supervision label |
+| 04 — Monte Carlo Audit Capacity & Prioritization Tradeoff Simulation | ⏳ Planned | Audit capacity scenarios, scenario-based recovery potential, and prioritization tradeoffs from full-population scores |
+
+> All ✅ Complete entries above reflect a **development sample run** based on a 500,000-row provider-service slice of the CMS Part B data, not the full production run. See the [Development Sample vs. Full Production Run](#development-sample-vs-full-production-run) section for details.
 
 ---
 
@@ -48,7 +50,8 @@ This platform applies gradient-boosted ensemble models and Monte Carlo simulatio
 │                      MODEL LAYER                                │
 │  XGBoost + LightGBM GPU ensemble (modeling.py)                  │
 │  Unsupervised anomaly detection → pseudo-label → supervised     │
-│  Monte Carlo simulation for recovery estimates (simulation.py)  │
+│  Monte Carlo audit capacity & prioritization simulation         │
+│  (illustrative recovery-potential ranges) (simulation.py)       │
 │  RAPIDS cuDF for data pipeline acceleration                     │
 └───────────────────────────┬─────────────────────────────────────┘
                             │  evaluation.py
@@ -124,11 +127,20 @@ conda env create -f environment.yml
 conda activate medicare-audit
 
 # 2. Download CMS data
+#    The static CMS CSV URLs (Provider-Service, Provider, Geography-Service, LEIE)
+#    are maintained centrally in src/config.py — update them there if CMS rotates
+#    the published file paths. Do not hand-paste CMS portal URLs into commands.
 python src/download_data.py
 
 # 3. Run EDA notebook
 jupyter lab notebooks/01_eda_feature_engineering.py
 ```
+
+> The current ✅ Complete notebook results in this README were generated from a
+> **500,000-row development sample** of the Provider-Service file. The full
+> production run (complete `provider_service_2022.csv`, ~10M rows, ~1.2M
+> providers) has **not** been completed yet. See
+> [Development Sample vs. Full Production Run](#development-sample-vs-full-production-run).
 
 ## Domain Expertise → Feature Engineering
 
@@ -147,17 +159,28 @@ The value proposition isn't the algorithms — the differentiator is knowing *wh
 
 The pipeline layers three notebooks so that each stage is auditable on its own and the supervised model never sees the signals that defined its label.
 
-- **Notebook 01 — Domain-Informed Feature Engineering.** Builds provider-level audit-priority features from CMS Part B data (charge-to-allowed ratios, peer specialty z-scores, service-mix concentration, utilization outliers, place-of-service mix, drug revenue share, geographic deviation).
-- **Notebook 02 — Anomaly Scores and Weak-Supervision Label.** Runs Isolation Forest at provider scale, derives a composite review signal, and emits `weak_label_high_audit_priority` — a weak-supervision label that flags providers worth a follow-up review under this framework. Also performs an end-to-end LEIE cross-reference for validation.
-- **Notebook 03 — Leakage-Controlled Supervised Models.** Trains Logistic Regression, XGBoost, and LightGBM against the weak-supervision label, with the anomaly-stage signals excluded from the feature set. Selects the best model by PR-AUC and scores the full provider population for downstream simulation.
+- **Notebook 01 — Domain-Informed Feature Engineering.** Builds approximately **28 provider-service-level** audit-priority features from CMS Part B data (charge-to-allowed ratios, peer specialty z-scores, service-mix concentration, utilization outliers, place-of-service mix, drug revenue share, geographic deviation).
+- **Notebook 02 — Anomaly Scores and Weak-Supervision Label.** Aggregates the service-level features into **121 provider-level columns** (in the current development sample run), runs Isolation Forest at provider scale, derives a composite review signal, and emits `weak_label_high_audit_priority` — a weak-supervision label that flags providers worth a follow-up review under this framework. Also performs an end-to-end LEIE cross-reference for validation.
+- **Notebook 03 — Leakage-Controlled Supervised Models.** Trains Logistic Regression, XGBoost, and LightGBM against the weak-supervision label, with the anomaly-stage signals excluded from the feature set. Selects the best model by PR-AUC and scores the full sampled provider population for downstream simulation.
 
 ## Current Results
 
-### Notebook 02 — Anomaly Detection and Weak Labels
+> ⚠️ **Development sample run based on 500,000 provider-service rows.**
+> The metrics below were generated from a 500,000-row sample of the
+> Provider-Service file used to develop and validate the pipeline end-to-end.
+> They are **not** the final full Medicare Part B production-run figures.
+> The full production run should be executed against the complete
+> `provider_service_2022.csv` and is expected to produce a substantially
+> larger provider-level population (on the order of ~1M+ providers, vs. the
+> 58,866 surfaced by the development sample). All counts, prevalence rates,
+> PR-AUC, precision@k, and lift values will change once rerun on the full file.
 
-| Metric | Value |
-|--------|-------|
-| Provider-level rows | 58,866 |
+### Notebook 02 — Anomaly Detection and Weak Labels (development sample run)
+
+| Metric | Value (development sample) |
+|--------|----------------------------|
+| Provider-service rows in sample | 500,000 |
+| Provider-level rows (after aggregation) | 58,866 |
 | Provider-level columns (final save) | 121 |
 | Isolation Forest anomalies | 2,944 providers (5.00%) |
 | Weak-label positives (`weak_label_high_audit_priority`) | 1,631 providers (2.77%) |
@@ -165,9 +188,9 @@ The pipeline layers three notebooks so that each stage is auditable on its own a
 
 > **Limitation noted in Notebook 02:** Population-level anomaly detection can reflect provider-type structure (specialty mix, billing norms). Future work should evaluate provider-type-specific or specialty-specific anomaly detection so that "unusual" is judged against true peer behavior rather than the overall provider population.
 
-### Notebook 03 — Supervised Model Training
+### Notebook 03 — Supervised Model Training (development sample run)
 
-Dataset: 58,866 providers × 121 columns. Features used for modeling: 108. Target: `weak_label_high_audit_priority` (prevalence 2.77%).
+Dataset (development sample): 58,866 providers × 121 columns. Features used for modeling: 108. Target: `weak_label_high_audit_priority` (prevalence 2.77% in the sample).
 
 | Model | PR-AUC | ROC AUC | Precision@100 | Precision@500 | Lift@100 |
 |-------|--------|---------|---------------|---------------|----------|
@@ -175,7 +198,16 @@ Dataset: 58,866 providers × 121 columns. Features used for modeling: 108. Targe
 | XGBoost | 0.9660 | 0.9988 | 1.0000 | 0.6420 | 36.12× |
 | **LightGBM (best)** | **0.9759** | **0.9992** | **1.0000** | **0.6480** | **36.12×** |
 
-Best model selected by Average Precision / PR-AUC: **LightGBM**, persisted to `models/best_model_2022.joblib` with companion metadata.
+Best model selected by Average Precision / PR-AUC: **LightGBM**, persisted to `models/best_model_2022.joblib` with companion metadata. These figures characterize the development sample run only and should be regenerated against the full production file before any external interpretation.
+
+## Development Sample vs. Full Production Run
+
+This repository currently reflects a **development sample run**, not a full Medicare Part B production run.
+
+- **What the current metrics show.** The figures in [Current Results](#current-results) demonstrate that the end-to-end pipeline (download → feature engineering → provider aggregation → anomaly detection → weak-supervision label → leakage-controlled supervised models → full-population scoring) runs cleanly against a manageable dev-sized input. They are a **pipeline validation**, not a portfolio-grade headline number.
+- **How they were generated.** All ✅ Complete notebook outputs were produced from a **500,000-row sample parquet** of the Provider-Service file used during development to keep iteration cycles short on a single workstation (WSL2 Ubuntu, RTX 5080).
+- **What the full production run requires.** The final portfolio metrics should be regenerated from the **complete CMS Provider-Service file** (`provider_service_2022.csv`, ~10M rows) using the same notebooks. The full provider-level population is expected to be on the order of ~1M+ providers rather than 58,866, and every count, prevalence rate, PR-AUC, precision@k, and lift value should be expected to shift accordingly.
+- **What to do before publication.** Before publication or recruiter review, rerun Notebooks 01 → 02 → 03 against the full file, regenerate the artifacts listed under [Generated Outputs](#generated-outputs), and update the [Current Results](#current-results) tables with the production figures.
 
 ## Leakage Controls
 
@@ -221,11 +253,11 @@ These artifacts are produced locally by the notebooks. They are not necessarily 
 
 ## Next Phase
 
-**Notebook 04 — Monte Carlo Audit Recovery / Scenario Simulation.** Use the full-population model scores from `model_predictions_full_population_2022.parquet` to simulate:
+**Notebook 04 — Monte Carlo Audit Capacity & Prioritization Tradeoff Simulation.** Use the full-population model scores from `model_predictions_full_population_2022.parquet` to simulate:
 
 - Audit review capacity scenarios (top-K provider review under realistic staffing)
-- Estimated recovery scenario ranges under varying assumptions
-- Uncertainty bands via Monte Carlo resampling
+- Scenario-based recovery potential under varying assumptions
+- Uncertainty bands via Monte Carlo resampling (illustrative recovery-potential ranges)
 - Prioritization tradeoffs (depth vs. breadth, specialty mix, geographic coverage)
 
-The deliverable is a set of illustrative recovery-potential ranges and prioritization curves — decision support for "where would limited review capacity go furthest under these assumptions," not a forecast of confirmed recoveries.
+The deliverable is a set of illustrative recovery-potential ranges and prioritization curves — decision support for "where would limited review capacity go furthest under these assumptions," not a forecast of confirmed recoveries. Notebook 04 should ideally be run on full-production scores; the current development sample results are sufficient for wiring the simulation but not for portfolio-grade scenario figures.
