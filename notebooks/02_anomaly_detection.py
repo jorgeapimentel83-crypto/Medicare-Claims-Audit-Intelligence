@@ -65,7 +65,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    PROJECT_ROOT = Path("..").resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from config import PATHS, DEFAULT_YEAR
@@ -269,9 +272,9 @@ core_numeric_cols = [
 
 for col in core_numeric_cols:
     if col in df.columns:
-        agg_dict[f"{col}_sum"] = (col, "sum")
-        agg_dict[f"{col}_mean"] = (col, "mean")
-        agg_dict[f"{col}_max"] = (col, "max")
+        agg_dict[f"core_{col}_sum"] = (col, "sum")
+        agg_dict[f"core_{col}_mean"] = (col, "mean")
+        agg_dict[f"core_{col}_max"] = (col, "max")
 
 # Add service diversity and record count
 provider_features = (
@@ -418,7 +421,7 @@ missing_by_col
 #
 # Plain-English Logic:
 # Our features live on wildly different scales:
-#   - Tot_Mdcr_Pymt_Amt_sum can be in the millions of dollars
+#   - core_Tot_Mdcr_Pymt_Amt_sum can be in the millions of dollars
 #   - feat_charge_to_allowed_max is a ratio close to 1
 #   - feat_hhi_max is a concentration index between 0 and 1
 #   - service counts are integers from 1 to tens of thousands
@@ -538,6 +541,81 @@ anomaly_counts["pct"] = (
 anomaly_counts
 
 # %%
+# Step 9B — Visualize Isolation Forest Anomaly Score Distribution
+#
+# Business Purpose:
+# Show the shape of the iso_anomaly_score distribution so a reader can see
+# where the contamination cut line falls and how flagged versus unflagged
+# providers separate.
+#
+# Plain-English Logic:
+# We plot a histogram of iso_anomaly_score. Providers below the
+# contamination=0.05 threshold form the bulk of the distribution; the right
+# tail contains the providers that got iso_anomaly_flag == 1. We split the
+# histogram into two overlaid series so the reader can see both populations
+# at once.
+#
+# Expected Output:
+# A figure saved to reports/isolation_forest_anomaly_scores.png. Title and
+# labels use review-priority language only — no fraud or finding wording.
+#
+# Why It Matters:
+# A distribution plot makes the contamination parameter concrete. It lets the
+# reader see that "flagged" is just a chosen tail of a continuous score, not
+# a binary determination of unusual behavior.
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+scores_unflagged = provider_features.loc[
+    provider_features["iso_anomaly_flag"] == 0, "iso_anomaly_score"
+]
+scores_flagged = provider_features.loc[
+    provider_features["iso_anomaly_flag"] == 1, "iso_anomaly_score"
+]
+
+ax.hist(
+    scores_unflagged,
+    bins=80,
+    color="#4C72B0",
+    alpha=0.75,
+    edgecolor="white",
+    label="Unflagged providers",
+)
+ax.hist(
+    scores_flagged,
+    bins=80,
+    color="#C44E52",
+    alpha=0.75,
+    edgecolor="white",
+    label="Flagged providers (review-priority signal)",
+)
+
+cut_line = scores_flagged.min() if len(scores_flagged) else None
+if cut_line is not None:
+    ax.axvline(
+        cut_line,
+        color="black",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"Flag threshold ≈ {cut_line:.3f}",
+    )
+
+ax.set_xlabel("Isolation Forest Anomaly Score (higher = more unusual)")
+ax.set_ylabel("Number of providers")
+ax.set_title("Anomaly Score Distribution — Isolation Forest Review-Priority Signal")
+ax.legend()
+
+plt.tight_layout()
+
+iso_score_plot_path = PATHS["reports"] / "isolation_forest_anomaly_scores.png"
+plt.savefig(iso_score_plot_path, dpi=150, bbox_inches="tight")
+plt.show()
+
+print("Saved:", iso_score_plot_path)
+
+# %%
 # Step 10 — Review Highest-Scoring Anomaly Providers
 #
 # Business Purpose:
@@ -590,9 +668,9 @@ priority_review_cols = [
     "feat_log_srvcs_per_bene_max",
     "feat_drug_revenue_share_max",
     "feat_facility_ratio_max",
-    "Tot_Mdcr_Pymt_Amt_sum",
-    "Tot_Srvcs_sum",
-    "Tot_Benes_sum",
+    "core_Tot_Mdcr_Pymt_Amt_sum",
+    "core_Tot_Srvcs_sum",
+    "core_Tot_Benes_sum",
 ]
 
 available_review_cols = [
@@ -710,6 +788,69 @@ provider_type_summary_rate[
         "max_anomaly_score",
     ]
 ].head(20)
+
+# %%
+# Step 11C — Visualize Provider Types with the Highest Anomaly Rates
+#
+# Business Purpose:
+# Make the structural-difference pattern from Step 11B visible at a glance:
+# which provider types get flagged at rates well above the overall ~5%
+# contamination baseline.
+#
+# Plain-English Logic:
+# We take provider_type_summary_rate (already filtered to total_providers
+# >= 50) and bar-chart the top 15 provider types by anomaly_rate. A
+# reference line at 0.05 marks the baseline contamination so the reader can
+# see how far each specialty sits above population average.
+#
+# Expected Output:
+# A figure saved to reports/provider_type_anomaly_rates.png with safe,
+# review-priority language. No fraud or finding wording.
+#
+# Why It Matters:
+# The chart visually reinforces the limitation note in Step 12: provider
+# types with structurally distinct billing footprints (labs, ambulance,
+# ASCs, IDTFs) are more likely to be flagged by a population-level model —
+# this is a feature of the data, not evidence of provider behavior.
+
+top_rate_n = 15
+top_rate_chart_data = (
+    provider_type_summary_rate
+    .head(top_rate_n)
+    .iloc[::-1]
+)
+
+fig, ax = plt.subplots(figsize=(12, 8))
+
+ax.barh(
+    range(len(top_rate_chart_data)),
+    top_rate_chart_data["anomaly_rate"].values,
+    color="#4C72B0",
+    alpha=0.85,
+    edgecolor="white",
+)
+ax.set_yticks(range(len(top_rate_chart_data)))
+ax.set_yticklabels(top_rate_chart_data["provider_type"].values, fontsize=9)
+ax.axvline(
+    0.05,
+    color="black",
+    linestyle="--",
+    linewidth=1.2,
+    label="Contamination baseline (0.05)",
+)
+ax.set_xlabel("Share of providers flagged (anomaly rate)")
+ax.set_title(
+    "Anomaly Rate by Provider Type — Provider-Type Structural Differences"
+)
+ax.legend(loc="lower right")
+
+plt.tight_layout()
+
+type_rate_plot_path = PATHS["reports"] / "provider_type_anomaly_rates.png"
+plt.savefig(type_rate_plot_path, dpi=150, bbox_inches="tight")
+plt.show()
+
+print("Saved:", type_rate_plot_path)
 
 # %%
 # Step 12 — Document Interpretation Limitation
@@ -913,6 +1054,140 @@ weak_label_type_summary = weak_label_type_summary.sort_values(
 )
 
 weak_label_type_summary.head(20)
+
+# %%
+# Step 14B — Cross-Reference Anomaly Signals With LEIE Exclusions
+#
+# Business Purpose:
+# Compare the unsupervised anomaly score and the weak label against the OIG
+# List of Excluded Individuals/Entities (LEIE) so we have at least one
+# external public reference point for the signals produced in this notebook.
+#
+# Plain-English Logic:
+# The LEIE is a public list maintained by the HHS Office of Inspector
+# General. It identifies individuals and entities excluded from federal
+# healthcare programs for a wide variety of reasons — many of which are
+# unrelated to Medicare billing patterns. We:
+#   1. Load data/raw/leie_exclusions.csv defensively.
+#   2. Look for an NPI column. Many LEIE rows have NPI = "0000000000"
+#      (no NPI on file). We treat that placeholder as "no NPI" and drop it.
+#   3. Normalize both LEIE NPIs and provider Rndrng_NPI to strings and check
+#      membership.
+#   4. Add provider_features["in_leie"] (1 if matched, 0 otherwise).
+#   5. Compare iso_anomaly_score, iso_anomaly_flag rate, and (if present)
+#      weak_label_high_audit_priority rate across in_leie groups.
+#
+# Expected Output:
+# - A printed count of LEIE NPIs and the number that match Part B providers.
+# - Mean iso_anomaly_score by in_leie.
+# - iso_anomaly_flag rate by in_leie.
+# - weak_label_high_audit_priority rate by in_leie (if column exists).
+# If the LEIE file lacks a usable NPI column, a clear note is printed and
+# this cell does not crash.
+#
+# Why It Matters:
+# LEIE is not a fraud, overpayment, or noncompliance label. It is an
+# external public reference list that may give a small amount of validation
+# context for our anomaly and weak-label signals. A modest lift in average
+# anomaly score among LEIE-listed providers would be supportive but not
+# conclusive. No lift would not invalidate the signals — most LEIE
+# exclusions involve issues outside Medicare Part B billing patterns.
+#
+# What to Check Before Moving On:
+# - The cell ran without errors even if no NPI column was usable.
+# - If any LEIE NPIs matched Part B providers, the printed comparison shows
+#   group sizes and averages; treat any difference as suggestive only.
+
+leie_path = PATHS["data_raw"] / "leie_exclusions.csv"
+
+print("LEIE source:", leie_path)
+print("LEIE file exists:", leie_path.exists())
+
+leie_validation_ran = False
+
+if leie_path.exists():
+    leie_df = pd.read_csv(leie_path, dtype=str, low_memory=False)
+    print("LEIE rows loaded:", f"{len(leie_df):,}")
+    print("LEIE columns:", list(leie_df.columns))
+
+    leie_npi_col = None
+    for candidate in ["NPI", "npi", "Npi"]:
+        if candidate in leie_df.columns:
+            leie_npi_col = candidate
+            break
+
+    if leie_npi_col is None:
+        print(
+            "Note: LEIE file does not contain a recognizable NPI column. "
+            "Skipping NPI-based cross-reference."
+        )
+    else:
+        leie_npis_raw = (
+            leie_df[leie_npi_col]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
+        # The LEIE uses "0000000000" as a placeholder when no NPI is on file.
+        leie_npis = set(
+            npi for npi in leie_npis_raw
+            if npi and npi != "0000000000"
+        )
+
+        print("LEIE rows with a usable NPI:", f"{len(leie_npis):,}")
+
+        provider_npis = (
+            provider_features["Rndrng_NPI"]
+            .astype(str)
+            .str.strip()
+        )
+
+        provider_features["in_leie"] = provider_npis.isin(leie_npis).astype(int)
+        leie_validation_ran = True
+
+        n_match = int(provider_features["in_leie"].sum())
+        print("Part B providers matched against LEIE:", f"{n_match:,}")
+
+        if n_match == 0:
+            print(
+                "Note: no Part B providers in this dataset overlap with the "
+                "LEIE list. Cross-reference comparisons are not meaningful."
+            )
+        else:
+            score_by_leie = (
+                provider_features
+                .groupby("in_leie")["iso_anomaly_score"]
+                .agg(["count", "mean", "median"])
+                .rename(columns={"count": "providers"})
+            )
+            print("\niso_anomaly_score by in_leie:")
+            print(score_by_leie)
+
+            flag_rate_by_leie = (
+                provider_features
+                .groupby("in_leie")["iso_anomaly_flag"]
+                .mean()
+                .rename("iso_anomaly_flag_rate")
+            )
+            print("\niso_anomaly_flag rate by in_leie:")
+            print(flag_rate_by_leie)
+
+            if "weak_label_high_audit_priority" in provider_features.columns:
+                weak_rate_by_leie = (
+                    provider_features
+                    .groupby("in_leie")["weak_label_high_audit_priority"]
+                    .mean()
+                    .rename("weak_label_rate")
+                )
+                print("\nweak_label_high_audit_priority rate by in_leie:")
+                print(weak_rate_by_leie)
+else:
+    print(
+        "Note: LEIE file not found at the expected path. Skipping LEIE "
+        "cross-reference validation."
+    )
+
+print("\nLEIE validation ran end-to-end:", leie_validation_ran)
 
 # %%
 # Step 15 — Save Provider-Level Labeled Feature Table
