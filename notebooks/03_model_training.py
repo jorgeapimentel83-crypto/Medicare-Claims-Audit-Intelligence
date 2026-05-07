@@ -94,9 +94,14 @@ print("Year:", YEAR)
 #
 # Plain-English Logic:
 # Notebook 02 saved one row per NPI to:
-#   data/processed/provider_features_labeled_<YEAR>.parquet
+#   data/processed/provider_features_labeled_<YEAR>_full.parquet
 # We read it back here. We also print the prevalence of the target so the
 # class balance is visible before any modeling decisions.
+#
+# Full-Run Note:
+# This full run uses the complete provider-level labeled table created
+# from 9,755,427 provider-service rows and 1,148,873 providers. It
+# replaces the earlier 500,000-row development sample metrics.
 #
 # Expected Output:
 # - Dataframe shape (rows, columns)
@@ -113,7 +118,7 @@ print("Year:", YEAR)
 # Confirm the target column exists, has both 0s and 1s, and that the
 # positive rate matches what Notebook 02's Step 13 reported.
 
-labeled_path = PATHS["data_processed"] / f"provider_features_labeled_{YEAR}.parquet"
+labeled_path = PATHS["data_processed"] / f"provider_features_labeled_{YEAR}_full.parquet"
 
 print("Loading:", labeled_path)
 
@@ -780,7 +785,7 @@ else:
 #
 # Expected Output:
 # A parquet file at:
-#   data/processed/model_predictions_<YEAR>.parquet
+#   data/processed/model_predictions_<YEAR>_full.parquet
 #
 # Why It Matters:
 # Saving the predictions decouples scoring from training. A future
@@ -813,7 +818,7 @@ if xgb_probs is not None:
 if lgb_probs is not None:
     predictions_df["lgb_proba"] = lgb_probs
 
-predictions_path = PATHS["data_processed"] / f"model_predictions_{YEAR}.parquet"
+predictions_path = PATHS["data_processed"] / f"model_predictions_{YEAR}_full.parquet"
 predictions_df.to_parquet(predictions_path, engine="pyarrow", index=False)
 
 print("Saved:", predictions_path)
@@ -855,7 +860,7 @@ print("Columns saved:", list(predictions_df.columns))
 #
 # Expected Output:
 # A parquet file at:
-#   data/processed/model_predictions_full_population_<YEAR>.parquet
+#   data/processed/model_predictions_full_population_<YEAR>_full.parquet
 # with columns:
 #   Rndrng_NPI, provider_type, provider_state,
 #   weak_label_high_audit_priority,
@@ -891,7 +896,7 @@ if lgb_model is not None:
     full_population_df["lgb_full_probability"] = lgb_model.predict_proba(X)[:, 1]
 
 full_population_path = (
-    PATHS["data_processed"] / f"model_predictions_full_population_{YEAR}.parquet"
+    PATHS["data_processed"] / f"model_predictions_full_population_{YEAR}_full.parquet"
 )
 full_population_df.to_parquet(full_population_path, engine="pyarrow", index=False)
 
@@ -925,8 +930,8 @@ print(
 # not a fraud, overpayment, noncompliance, or audit finding label.
 #
 # Expected Output:
-# - models/best_model_<YEAR>.joblib
-# - models/best_model_<YEAR>_metadata.json
+# - models/best_model_<YEAR>_full.joblib
+# - models/best_model_<YEAR>_full_metadata.json
 #
 # Why It Matters:
 # Saving the model decouples training from scoring. Later work can
@@ -958,7 +963,7 @@ elif best_model_name == "LightGBM":
 else:
     best_estimator = lr_pipeline
 
-best_model_path = PATHS["models"] / f"best_model_{YEAR}.joblib"
+best_model_path = PATHS["models"] / f"best_model_{YEAR}_full.joblib"
 joblib.dump(best_estimator, best_model_path)
 
 best_model_metadata = {
@@ -975,7 +980,7 @@ best_model_metadata = {
     ),
 }
 
-best_model_metadata_path = PATHS["models"] / f"best_model_{YEAR}_metadata.json"
+best_model_metadata_path = PATHS["models"] / f"best_model_{YEAR}_full_metadata.json"
 with open(best_model_metadata_path, "w", encoding="utf-8") as f:
     json.dump(best_model_metadata, f, indent=2)
 
@@ -1009,8 +1014,21 @@ print("ROC AUC              :", round(best_model_metadata["roc_auc"], 4))
 best_row = results_df.iloc[0]
 
 print("=" * 60)
-print("Notebook 03 Summary")
+print("Notebook 03 Summary — FULL-DATA RUN")
 print("=" * 60)
+print(
+    "Run type                        : FULL provider-level labeled dataset"
+)
+print(
+    "Source                          : "
+    "provider_features_labeled_<YEAR>_full.parquet "
+    "(built from 9,755,427 provider-service rows / 1,148,873 providers)"
+)
+print(
+    "Replaces                        : earlier 500,000-row development "
+    "sample metrics"
+)
+print("-" * 60)
 print(f"Best model by Average Precision : {best_row['model']}")
 print(f"  Average Precision (PR-AUC)    : {best_row['average_precision']:.4f}")
 print(f"  ROC AUC                       : {best_row['roc_auc']:.4f}")
@@ -1025,9 +1043,10 @@ print(f"Best model saved to             : {best_model_path}")
 print(f"Best-model metadata saved to    : {best_model_metadata_path}")
 print("=" * 60)
 print(
-    "Reminder: weak_label_high_audit_priority is a research signal "
-    "derived from public CMS data. It is not a fraud, overpayment, "
-    "noncompliance, or audit finding. Treat predictions accordingly."
+    "Reminder: weak_label_high_audit_priority is a weak-supervision "
+    "label and a review signal derived from public CMS data. The "
+    "model output is decision support for audit-priority research. "
+    "Treat predictions as a ranked review signal, not a finding."
 )
 
 # %%

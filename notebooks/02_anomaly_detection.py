@@ -98,7 +98,7 @@ print("Year:", YEAR)
 # What to Check Before Moving On:
 # Confirm the file exists, loads successfully, and includes feat_ columns.
 
-feature_path = PATHS["data_processed"] / f"features_provider_service_{YEAR}.parquet"
+feature_path = PATHS["data_processed"] / f"features_provider_service_{YEAR}_full.parquet"
 
 print("Loading:", feature_path)
 
@@ -1222,7 +1222,7 @@ print("\nLEIE validation ran end-to-end:", leie_validation_ran)
 # - weak_label_high_audit_priority column is present and has both 0s and 1s
 # - Weak-label positive count matches what Step 13 reported
 
-output_path = PATHS["data_processed"] / f"provider_features_labeled_{YEAR}.parquet"
+output_path = PATHS["data_processed"] / f"provider_features_labeled_{YEAR}_full.parquet"
 
 provider_features.to_parquet(output_path, engine="pyarrow", index=False)
 
