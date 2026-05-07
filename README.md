@@ -13,7 +13,7 @@ Built by a federal healthcare auditor (HHS/OIG, ~11 years) to demonstrate how do
 | 01 — EDA and Domain-Informed Feature Engineering | ✅ Complete (full run) | Builds ~28 provider-service-level audit-priority features from CMS Part B data |
 | 02 — Provider-Level Anomaly Detection and Weak Supervision | ✅ Complete (full run) | Aggregates 9.76M provider-service rows into 1,148,873 provider-level rows × 121 columns; Isolation Forest scoring, weak-supervision audit-priority labels, LEIE cross-reference |
 | 03 — Supervised Model Training (XGBoost / LightGBM) | ✅ Complete (full run) | Leakage-controlled supervised models trained on the weak-supervision label across the full provider population |
-| 04 — Monte Carlo Audit Capacity & Prioritization Tradeoff Simulation | ⏳ Planned | Audit capacity scenarios, scenario-based recovery potential, and prioritization tradeoffs from full-population scores |
+| 04 — Monte Carlo Audit Capacity & Prioritization Tradeoff Simulation | ✅ Complete (full run) | Audit capacity scenarios, scenario-based recovery-potential ranges, and prioritization tradeoffs simulated from the full 1,148,873-provider population scores |
 
 > All ✅ Complete entries above reflect the **full production-scale run** against the complete CMS Medicare Part B Provider-Service file (9,755,427 provider-service rows / 1,148,873 providers). An earlier 500,000-row development sample was used during prototyping to keep iteration cycles short; the headline metrics in this README now reflect the full run, not that earlier sample.
 
@@ -158,11 +158,12 @@ The value proposition isn't the algorithms — the differentiator is knowing *wh
 
 ## Modeling Approach
 
-The pipeline layers three notebooks so that each stage is auditable on its own and the supervised model never sees the signals that defined its label.
+The pipeline layers four notebooks so that each stage is auditable on its own and the supervised model never sees the signals that defined its label.
 
 - **Notebook 01 — Domain-Informed Feature Engineering.** Builds approximately **28 provider-service-level** audit-priority features from CMS Part B data (charge-to-allowed ratios, peer specialty z-scores, service-mix concentration, utilization outliers, place-of-service mix, drug revenue share, geographic deviation).
 - **Notebook 02 — Anomaly Scores and Weak-Supervision Label.** Aggregates the service-level features into **121 provider-level columns** across the full 1,148,873-provider population, runs Isolation Forest at provider scale, derives a composite review signal, and emits `weak_label_high_audit_priority` — a weak-supervision label that flags providers worth a follow-up review under this framework. Also performs an end-to-end LEIE cross-reference for validation.
 - **Notebook 03 — Leakage-Controlled Supervised Models.** Trains Logistic Regression, XGBoost, and LightGBM against the weak-supervision label, with the anomaly-stage signals excluded from the feature set. Selects the best model by PR-AUC and scores the full provider population for downstream simulation.
+- **Notebook 04 — Audit Capacity and Scenario-Based Recovery-Potential Simulation.** Consumes the full-population model scores from Notebook 03, ranks all 1,148,873 providers by audit-priority, and simulates capacity scenarios (Top 100 / 500 / 1,000 / 5,000 / 10,000). Reports weak-label precision, recall, and lift for each scenario, then layers analyst-defined recovery-potential assumptions and a Monte Carlo (triangular distribution, 5,000 trials per scenario) to express results as illustrative recovery-potential ranges, not actual recovery estimates.
 
 ## Current Results
 
@@ -210,6 +211,26 @@ Dataset (full run): 1,148,873 providers × 121 columns. Features used for modeli
 
 Best model selected by Average Precision / PR-AUC: **LightGBM**, persisted to `models/best_model_2022_full.joblib` with companion metadata at `models/best_model_2022_full_metadata.json`. These are full-population figures that characterize how well the supervised models reconstruct the weak-supervision audit-priority framework — see [Important Limitation](#important-limitation) for what high PR-AUC and precision@k do and do not mean here.
 
+### Notebook 04 — Monte Carlo Audit Capacity & Recovery-Potential Simulation (full run)
+
+Notebook 04 takes the full-population audit-priority scores from Notebook 03 and turns them into a decision-support view for audit-capacity planning. It is **not** an estimate of actual recoveries — every dollar figure below is an *illustrative recovery-potential range* built from analyst-defined assumption inputs and Monte Carlo resampling.
+
+| Setting | Value |
+|---------|-------|
+| Input | `data/processed/model_predictions_full_population_2022_full.parquet` |
+| Providers scored (full population) | 1,148,873 |
+| Model score used (best model from Notebook 03) | `lgb_full_probability` |
+| Audit-capacity scenarios | Top 100 / 500 / 1,000 / 5,000 / 10,000 |
+| Per-scenario metrics computed | `providers_reviewed`, `weak_label_hits`, `weak_label_precision`, `weak_label_recall`, `lift_vs_random` |
+| Illustrative deterministic per-hit recovery-potential assumptions | conservative $2,500 / moderate $7,500 / high $15,000 |
+| Monte Carlo distribution (per weak-label hit) | Triangular: low $1,000 / mode $7,500 / high $25,000 |
+| Monte Carlo trials per scenario | 5,000 |
+| Per-scenario simulation summary | mean, median, p10, p90, min, max |
+
+The capacity table makes the prioritization tradeoff explicit (small worklists are denser in weak-label positives but cover fewer of them; larger worklists trade per-provider density for coverage). The Monte Carlo step then replaces the deterministic per-hit assumptions with a distribution so each capacity scenario carries a p10–p90 uncertainty band rather than a single point.
+
+These outputs are **illustrative recovery-potential ranges**, not actual recoveries, confirmed overpayments, noncompliance findings, or audit findings. They exist to support "where would limited review capacity go furthest under these stated assumptions" decision support, and any provider on any of these worklists would still require independent follow-up review before any real-world conclusion.
+
 ## Development Sample vs. Full Production Run
 
 This repository now reflects the **full production-scale run** against the complete CMS Medicare Part B Provider-Service file.
@@ -236,7 +257,9 @@ This keeps the reported PR-AUC, precision@k, and lift figures interpretable as "
 - The supervised model predicts a **weak-supervision audit-priority label**, not confirmed audit outcomes.
 - It does **not** predict confirmed fraud, overpayments, noncompliance, or audit findings.
 - The high PR-AUC, precision@k, and lift values reflect how well the model learned the weak-supervision framework defined in Notebook 02. They are **not** measures of confirmed real-world audit outcomes.
-- Outputs are intended as **decision support** for prioritizing follow-up review of public CMS billing patterns. Any provider surfaced by the model would still require independent review under the appropriate audit process before any conclusion is drawn.
+- Notebook 04 simulates **illustrative recovery-potential ranges** under analyst-defined capacity scenarios and Monte Carlo assumptions. Its outputs are scenario-based decision support, not forecasts of actual recoveries, and not estimates of confirmed overpayments, noncompliance, or audit findings.
+- Outputs are intended as **decision support** for prioritizing follow-up review of public CMS billing patterns. Any provider surfaced by the model — or by any Notebook 04 capacity scenario — would still require independent review under the appropriate audit process before any conclusion is drawn.
+- Nothing in this project, end to end, determines fraud, overpayment, noncompliance, or audit findings.
 
 ## Generated Outputs
 
@@ -247,6 +270,8 @@ These artifacts are produced locally by the notebooks. They are not necessarily 
 - `data/processed/provider_features_labeled_2022_full.parquet`
 - `data/processed/model_predictions_2022_full.parquet`
 - `data/processed/model_predictions_full_population_2022_full.parquet`
+- `data/processed/audit_capacity_scenarios_2022_full.parquet`
+- `data/processed/monte_carlo_recovery_potential_2022_full.parquet`
 
 **Models (full run)**
 - `models/best_model_2022_full.joblib`
@@ -258,14 +283,16 @@ These artifacts are produced locally by the notebooks. They are not necessarily 
 - `reports/notebook03_precision_recall_curve.png`
 - `reports/notebook03_xgboost_feature_importance.png`
 - `reports/notebook03_lightgbm_feature_importance.png`
+- `reports/notebook04_capacity_tradeoff.png`
+- `reports/notebook04_monte_carlo_recovery_potential_ranges.png`
 
 ## Next Phase
 
-**Notebook 04 — Monte Carlo Audit Capacity & Prioritization Tradeoff Simulation.** Use the full-population model scores from `model_predictions_full_population_2022_full.parquet` to simulate:
+Notebooks 01 → 04 now run end-to-end against the full CMS Medicare Part B Provider-Service file. The next phase shifts from "build the pipeline" to "stress-test and present the framework." Candidate work, in rough order of priority:
 
-- Audit review capacity scenarios (top-K provider review under realistic staffing)
-- Scenario-based recovery potential under varying assumptions
-- Uncertainty bands via Monte Carlo resampling (illustrative recovery-potential ranges)
-- Prioritization tradeoffs (depth vs. breadth, specialty mix, geographic coverage)
+- **Provider-type-specific anomaly detection.** Re-run the Notebook 02 anomaly stage within specialty cohorts (or other peer groupings) so "unusual" is judged against true peer behavior rather than the overall provider population. Addresses the limitation flagged in Notebook 02.
+- **Behavioral-health audit-priority module.** A focused review-signal module for behavioral-health specialties, where billing patterns and peer norms differ enough from the rest of Medicare Part B that population-level signals can be noisy.
+- **Dashboard / Streamlit or React portfolio app.** An interactive front-end for the audit-priority worklist, capacity scenarios, and Monte Carlo recovery-potential ranges from Notebook 04 — built so a reviewer can move the capacity slider and see the precision/recall and illustrative recovery-potential range update live.
+- **Optional model calibration and sensitivity analysis.** Calibrate the supervised model's predicted probabilities and run sensitivity analysis on the Notebook 04 Monte Carlo inputs (triangular low/mode/high) so the illustrative recovery-potential ranges can be reported with explicit assumption-level commentary.
 
-The deliverable is a set of illustrative recovery-potential ranges and prioritization curves — decision support for "where would limited review capacity go furthest under these assumptions," not a forecast of confirmed recoveries. Notebook 04 will run on the full-population scores produced by the current full run.
+Every item above stays inside the same framing: public CMS data, weak-supervision audit-priority signals, decision support for follow-up review. None of it claims fraud, overpayment, noncompliance, or audit findings.
