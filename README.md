@@ -14,6 +14,7 @@ Built by a federal healthcare auditor (HHS/OIG, ~11 years) to demonstrate how do
 | 02 — Provider-Level Anomaly Detection and Weak Supervision | ✅ Complete (full run) | Aggregates 9.76M provider-service rows into 1,148,873 provider-level rows × 121 columns; Isolation Forest scoring, weak-supervision audit-priority labels, LEIE cross-reference |
 | 03 — Supervised Model Training (XGBoost / LightGBM) | ✅ Complete (full run) | Leakage-controlled supervised models trained on the weak-supervision label across the full provider population |
 | 04 — Monte Carlo Audit Capacity & Prioritization Tradeoff Simulation | ✅ Complete (full run) | Audit capacity scenarios, scenario-based recovery-potential ranges, and prioritization tradeoffs simulated from the full 1,148,873-provider population scores |
+| 05 — Behavioral Health Audit-Priority Module | ✅ Complete (full run) | Public-data behavioral-health cohort built from CMS specialty text, HCPCS codes, and HCPCS descriptions, with a tightened provider-level qualification rule and a focused review-priority worklist plus capacity scenarios |
 
 > All ✅ Complete entries above reflect the **full production-scale run** against the complete CMS Medicare Part B Provider-Service file (9,755,427 provider-service rows / 1,148,873 providers). An earlier 500,000-row development sample was used during prototyping to keep iteration cycles short; the headline metrics in this README now reflect the full run, not that earlier sample.
 
@@ -99,7 +100,8 @@ medicare-claims-audit-intelligence/
 │   ├── 01_eda_feature_engineering.py
 │   ├── 02_anomaly_detection.py
 │   ├── 03_model_training.py
-│   └── 04_monte_carlo_simulation.py
+│   ├── 04_monte_carlo_simulation.py
+│   └── 05_behavioral_health_module.py
 ├── src/
 │   ├── __init__.py
 │   ├── config.py                   # Centralized paths, hyperparams, feature lists
@@ -158,12 +160,13 @@ The value proposition isn't the algorithms — the differentiator is knowing *wh
 
 ## Modeling Approach
 
-The pipeline layers four notebooks so that each stage is auditable on its own and the supervised model never sees the signals that defined its label.
+The pipeline layers five notebooks so that each stage is auditable on its own and the supervised model never sees the signals that defined its label.
 
 - **Notebook 01 — Domain-Informed Feature Engineering.** Builds approximately **28 provider-service-level** audit-priority features from CMS Part B data (charge-to-allowed ratios, peer specialty z-scores, service-mix concentration, utilization outliers, place-of-service mix, drug revenue share, geographic deviation).
 - **Notebook 02 — Anomaly Scores and Weak-Supervision Label.** Aggregates the service-level features into **121 provider-level columns** across the full 1,148,873-provider population, runs Isolation Forest at provider scale, derives a composite review signal, and emits `weak_label_high_audit_priority` — a weak-supervision label that flags providers worth a follow-up review under this framework. Also performs an end-to-end LEIE cross-reference for validation.
 - **Notebook 03 — Leakage-Controlled Supervised Models.** Trains Logistic Regression, XGBoost, and LightGBM against the weak-supervision label, with the anomaly-stage signals excluded from the feature set. Selects the best model by PR-AUC and scores the full provider population for downstream simulation.
 - **Notebook 04 — Audit Capacity and Scenario-Based Recovery-Potential Simulation.** Consumes the full-population model scores from Notebook 03, ranks all 1,148,873 providers by audit-priority, and simulates capacity scenarios (Top 100 / 500 / 1,000 / 5,000 / 10,000). Reports weak-label precision, recall, and lift for each scenario, then layers analyst-defined recovery-potential assumptions and a Monte Carlo (triangular distribution, 5,000 trials per scenario) to express results as illustrative recovery-potential ranges, not actual recovery estimates.
+- **Notebook 05 — Behavioral Health Audit-Priority Module.** Builds a public-data behavioral-health cohort from CMS provider specialty text, HCPCS codes, and HCPCS descriptions, applies a tightened provider-level qualification rule (core specialty OR meaningful BH service concentration), and reuses the Notebook 03 model scores to produce a focused behavioral-health review-priority worklist plus capacity scenarios (Top 25 / 50 / 100 / 250 / 500 / 1,000). Outputs are a public-data approximation, not a clinical or compliance determination.
 
 ## Current Results
 
@@ -231,11 +234,53 @@ The capacity table makes the prioritization tradeoff explicit (small worklists a
 
 These outputs are **illustrative recovery-potential ranges**, not actual recoveries, confirmed overpayments, noncompliance findings, or audit findings. They exist to support "where would limited review capacity go furthest under these stated assumptions" decision support, and any provider on any of these worklists would still require independent follow-up review before any real-world conclusion.
 
+### Notebook 05 — Behavioral Health Audit-Priority Module (full run)
+
+Notebook 05 narrows the platform to behavioral-health-related provider-service records and reuses the Notebook 03 full-population model scores to produce a focused review-priority worklist plus capacity scenarios. The behavioral-health classification is a **public-data approximation** built from CMS provider specialty text, HCPCS codes, and HCPCS descriptions — it is not a clinical determination, not a credentialing check, and not a parity or documentation determination.
+
+| Setting | Value |
+|---------|-------|
+| Inputs | `features_provider_service_2022_full.parquet`, `provider_features_labeled_2022_full.parquet`, `model_predictions_full_population_2022_full.parquet` |
+| Behavioral-health provider-service rows | 302,604 (3.10% of all 9,755,427 provider-service rows) |
+| Behavioral-health providers (qualified cohort) | **46,711 (4.07% of 1,148,873)** |
+| Behavioral-health weak-label positives | 249 |
+| Risk score column used | `lgb_full_probability` (LightGBM, best model from Notebook 03) |
+| Capacity scenarios | Top 25 / 50 / 100 / 250 / 500 / 1,000 |
+| Top-25 capacity-scenario lift vs cohort baseline | **187.6×** |
+
+**Top behavioral-health provider types after qualification (counts):**
+
+| Provider type | Providers in cohort |
+|---|---|
+| Psychiatry | 18,760 |
+| Licensed Clinical Social Worker | 15,203 |
+| Psychologist, Clinical | 11,725 |
+| Addiction Medicine | 218 |
+| Geriatric Psychiatry | 172 |
+| Nurse Practitioner | 150 |
+| Neuropsychiatry | 139 |
+| Internal Medicine | 115 |
+| Family Practice | 112 |
+| Anesthesiology | 28 |
+
+#### Behavioral-health cohort tightening (why the qualification rule matters)
+
+Public CMS data does not provide a perfect "this provider is a behavioral-health clinician" label, so Notebook 05 builds the cohort in two layers.
+
+- **Loose row-level rule (kept for description, not cohort selection).** A row is `is_behavioral_health_row = 1` if its provider specialty matches a behavioral-health keyword OR its HCPCS_Desc matches a behavioral-health service keyword OR its HCPCS_Cd is in a curated CPT/HCPCS set or the H0001–H2037 H-code range. This is useful for surfacing behavioral-health-related billing activity across the population.
+- **Tightened provider-level rule (the actual cohort).** A provider qualifies as behavioral-health (`bh_any_behavioral_health = 1`) only if either:
+  - `bh_provider_core_flag` — the provider's specialty itself is a core behavioral-health type (Psychiatry, Clinical Psychologist, Licensed Clinical Social Worker, counselor, addiction medicine, marriage and family therapist, etc.), OR
+  - `bh_provider_volume_flag` — the provider has meaningful BH service concentration: `bh_service_rows >= 5` AND `bh_service_share >= 0.20` (i.e., at least 20% of the provider's own services are behavioral-health-tagged).
+
+An earlier broad version of the rule used standalone keywords like `"family"`, `"substance"`, and `"behavioral"`, which inadvertently swept in **Family Practice (78,867 providers)** and similar generalists. The tightened rule removed those bare tokens (replacing them with phrases like `"marriage and family"`, `"substance abuse"`, `"behavioral health"`) and added the provider-level concentration test, dropping the cohort from 223,777 to 46,711 providers and pushing Family Practice to 112 providers (only those whose own billing is meaningfully concentrated in behavioral-health services). The result is a behavioral-health cohort that actually looks like behavioral-health practices, and a Top-25 worklist that is dominated by Psychiatry, Neuropsychiatry, Opioid Treatment Program, and similar specialties rather than by generalist incidental billing.
+
+These outputs are a behavioral-health audit-priority module — **decision support for follow-up review**, not a clinical, parity, documentation, medical-necessity, or compliance determination, and not a fraud, overpayment, or audit-finding determination.
+
 ## Development Sample vs. Full Production Run
 
 This repository now reflects the **full production-scale run** against the complete CMS Medicare Part B Provider-Service file.
 
-- **Full run (current headline metrics).** Notebooks 01 → 02 → 03 have been run end-to-end against the complete `provider_service_2022.csv` (9,755,427 provider-service rows / 1,148,873 providers). All counts, prevalence rates, PR-AUC, precision@k, and lift values in [Current Results](#current-results) come from this run.
+- **Full run (current headline metrics).** Notebooks 01 → 02 → 03 → 04 → 05 have all been run end-to-end against the complete `provider_service_2022.csv` (9,755,427 provider-service rows / 1,148,873 providers). All counts, prevalence rates, PR-AUC, precision@k, lift, capacity-scenario, and behavioral-health figures in [Current Results](#current-results) come from this run.
 - **Earlier development sample (historical note).** During prototyping, the same pipeline was run against a **500,000-row sample parquet** of the Provider-Service file (58,866 providers) to keep iteration cycles short on a single workstation (WSL2 Ubuntu, RTX 5080). That sample was used to validate the end-to-end flow (download → feature engineering → provider aggregation → anomaly detection → weak-supervision label → leakage-controlled supervised models → full-population scoring) and is preserved here only as context. The development-sample numbers have been **superseded** by the full-run figures above and should not be cited as headline metrics.
 
 ## Leakage Controls
@@ -258,8 +303,9 @@ This keeps the reported PR-AUC, precision@k, and lift figures interpretable as "
 - It does **not** predict confirmed fraud, overpayments, noncompliance, or audit findings.
 - The high PR-AUC, precision@k, and lift values reflect how well the model learned the weak-supervision framework defined in Notebook 02. They are **not** measures of confirmed real-world audit outcomes.
 - Notebook 04 simulates **illustrative recovery-potential ranges** under analyst-defined capacity scenarios and Monte Carlo assumptions. Its outputs are scenario-based decision support, not forecasts of actual recoveries, and not estimates of confirmed overpayments, noncompliance, or audit findings.
-- Outputs are intended as **decision support** for prioritizing follow-up review of public CMS billing patterns. Any provider surfaced by the model — or by any Notebook 04 capacity scenario — would still require independent review under the appropriate audit process before any conclusion is drawn.
-- Nothing in this project, end to end, determines fraud, overpayment, noncompliance, or audit findings.
+- Notebook 05 builds a **behavioral-health audit-priority module** from a public-data approximation (CMS specialty text plus HCPCS codes and descriptions). It is not a clinical determination, not a credentialing check, and not a parity, documentation, medical-necessity, or compliance determination.
+- Outputs are intended as **decision support** for prioritizing follow-up review of public CMS billing patterns. Any provider surfaced by the model, by any Notebook 04 capacity scenario, or by the Notebook 05 behavioral-health worklist would still require independent review under the appropriate audit process before any conclusion is drawn.
+- Nothing in this project, end to end, determines fraud, overpayment, noncompliance, medical necessity, parity compliance, documentation sufficiency, or audit findings.
 
 ## Generated Outputs
 
@@ -272,6 +318,8 @@ These artifacts are produced locally by the notebooks. They are not necessarily 
 - `data/processed/model_predictions_full_population_2022_full.parquet`
 - `data/processed/audit_capacity_scenarios_2022_full.parquet`
 - `data/processed/monte_carlo_recovery_potential_2022_full.parquet`
+- `data/processed/behavioral_health_top_providers_2022_full.parquet`
+- `data/processed/behavioral_health_capacity_scenarios_2022_full.parquet`
 
 **Models (full run)**
 - `models/best_model_2022_full.joblib`
@@ -285,14 +333,17 @@ These artifacts are produced locally by the notebooks. They are not necessarily 
 - `reports/notebook03_lightgbm_feature_importance.png`
 - `reports/notebook04_capacity_tradeoff.png`
 - `reports/notebook04_monte_carlo_recovery_potential_ranges.png`
+- `reports/notebook05_behavioral_health_risk_score_distribution.png`
+- `reports/notebook05_behavioral_health_provider_type_rates.png`
+- `reports/notebook05_behavioral_health_capacity_tradeoff.png`
 
 ## Next Phase
 
-Notebooks 01 → 04 now run end-to-end against the full CMS Medicare Part B Provider-Service file. The next phase shifts from "build the pipeline" to "stress-test and present the framework." Candidate work, in rough order of priority:
+Notebooks 01 → 05 now run end-to-end against the full CMS Medicare Part B Provider-Service file. The next phase shifts from "build the pipeline" to "stress-test and present the framework." Candidate work, in rough order of priority:
 
 - **Provider-type-specific anomaly detection.** Re-run the Notebook 02 anomaly stage within specialty cohorts (or other peer groupings) so "unusual" is judged against true peer behavior rather than the overall provider population. Addresses the limitation flagged in Notebook 02.
-- **Behavioral-health audit-priority module.** A focused review-signal module for behavioral-health specialties, where billing patterns and peer norms differ enough from the rest of Medicare Part B that population-level signals can be noisy.
-- **Dashboard / Streamlit or React portfolio app.** An interactive front-end for the audit-priority worklist, capacity scenarios, and Monte Carlo recovery-potential ranges from Notebook 04 — built so a reviewer can move the capacity slider and see the precision/recall and illustrative recovery-potential range update live.
-- **Optional model calibration and sensitivity analysis.** Calibrate the supervised model's predicted probabilities and run sensitivity analysis on the Notebook 04 Monte Carlo inputs (triangular low/mode/high) so the illustrative recovery-potential ranges can be reported with explicit assumption-level commentary.
+- **Behavioral-health refinement / submodule expansion.** Iterate on the Notebook 05 cohort logic (e.g., raising the volume-flag concentration threshold, adding `bh_unique_hcpcs` minima, splitting therapy-only vs medication-management vs substance-use submodules) and broaden the behavioral-health module into more focused review-signal sub-cohorts. Each submodule stays inside the same public-data approximation framing as Notebook 05.
+- **Dashboard / Streamlit or React portfolio app.** An interactive front-end for the audit-priority worklist, capacity scenarios, Monte Carlo recovery-potential ranges from Notebook 04, and the behavioral-health worklist from Notebook 05 — built so a reviewer can move the capacity slider and see precision/recall and illustrative recovery-potential ranges update live.
+- **Final GitHub polish.** Tighten READMEs, notebook docstrings, and figures for portfolio review; add a short repository tour, an at-a-glance results page, and clean up any in-progress scaffolding so a reviewer can land on the repo and read it end to end without context.
 
-Every item above stays inside the same framing: public CMS data, weak-supervision audit-priority signals, decision support for follow-up review. None of it claims fraud, overpayment, noncompliance, or audit findings.
+Every item above stays inside the same framing: public CMS data, weak-supervision audit-priority signals, decision support for follow-up review. None of it claims fraud, overpayment, noncompliance, medical necessity, parity compliance, documentation sufficiency, or audit findings.
