@@ -5,7 +5,7 @@ Audit-specific model evaluation. Standard ML metrics (accuracy, F1)
 are misleading for audit targeting because:
   1. Base rate is low (~1-5% of providers are truly problematic)
   2. We care about PRECISION at the top of the ranked list
-  3. Cost of false negatives (missed fraud) >> cost of false positives (wasted audit)
+  3. Cost of missed high-priority review signals may exceed the cost of lower-yield follow-up review.
 
 Key metrics:
   - AUCPR (Average Precision): primary metric for imbalanced audit detection

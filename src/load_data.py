@@ -149,7 +149,7 @@ def load_leie(use_gpu: bool = False) -> pd.DataFrame:
     Load OIG List of Excluded Individuals/Entities.
 
     Used for weak supervision: providers on LEIE have been excluded from
-    federal healthcare programs for fraud, abuse, or other misconduct.
+    federal healthcare programs based on OIG exclusion records.
     Join on NPI to create pseudo-labels for model training.
 
     Note: LEIE is small (~75K rows), so GPU loading isn't necessary.

@@ -586,7 +586,7 @@ plt.show()
 # - `|r| < 0.5` → distinct signals, keep both.
 # - `0.5 ≤ |r| < 0.8` → some overlap, but each may add value;
 #   defer the decision to model-time importance analysis.
-# - `|r| ≥ 0.8` → almost certainly redundant; pick one.
+# - `|r| ≥ 0.8` → likely redundant; pick one.
 
 # %%
 numeric_feats = [c for c in feat_cols if df[c].dtype in ["float32", "float64", "int64", "int32"]]

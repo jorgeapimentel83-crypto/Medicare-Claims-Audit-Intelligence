@@ -5,6 +5,10 @@ data/processed/
 *.csv
 *.parquet
 *.h5
+*.xlsx
+
+# Local outputs (regenerated from notebooks/scripts)
+outputs/
 
 # Saved models
 models/*.json

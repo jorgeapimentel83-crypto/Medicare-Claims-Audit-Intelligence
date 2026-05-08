@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 from config import MONTE_CARLO_PARAMS
 
@@ -68,8 +69,10 @@ class MonteCarloAudit:
     n_simulations : int
         Number of Monte Carlo trials. 10,000 gives stable CI estimates.
     recovery_rate_mean : float
-        Mean recovery rate on confirmed overpayments (default: 0.65).
-        OIG historically recovers ~$6 per $1 invested in audit.
+        Illustrative adjustment factor applied to scenario-based
+        recovery-potential assumptions (default: 0.65). Used purely as a
+        scenario input — not an estimate of actual recoveries, confirmed
+        overpayments, noncompliance, or audit findings.
     recovery_rate_std : float
         Std of recovery rate to model uncertainty in actual recovery.
     random_state : int
@@ -102,7 +105,8 @@ class MonteCarloAudit:
         Parameters
         ----------
         risk_scores : array, shape (n_providers,)
-            Model-predicted probability that a provider has audit findings.
+            Model-predicted audit-priority score used for follow-up
+            review prioritization.
         payment_amounts : array, shape (n_providers,)
             Total Medicare payments per provider (recovery ceiling).
         threshold : float
