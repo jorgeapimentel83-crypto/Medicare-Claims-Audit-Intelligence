@@ -1,8 +1,60 @@
 # Medicare Claims Audit Intelligence Platform
 
-**GPU-accelerated anomaly detection and audit-priority ranking for Medicare Part B claims**
+A public-data healthcare audit analytics project that uses CMS Medicare Part B data, OIG LEIE exclusion records, domain-informed feature engineering, anomaly detection, weak-supervision modeling, supervised ML ranking, and Monte Carlo simulation to prioritize providers for follow-up review. Built by a federal healthcare auditor (HHS/OIG, ~11 years) to show how domain knowledge of audit-priority billing patterns translates into machine learning features that surface unusual billing behavior from public CMS data at population scale.
 
-Built by a federal healthcare auditor (HHS/OIG, ~11 years) to demonstrate how domain knowledge of audit-priority billing patterns can be translated into machine learning features that surface unusual billing behavior from public CMS data at population scale. Outputs are public-data decision-support signals — they do not identify fraud, overpayments, or noncompliance.
+> **Important:** This project produces audit-priority review signals from public summary data. It does not determine fraud, overpayments, noncompliance, medical necessity, documentation sufficiency, parity compliance, or audit findings. Outputs are decision support for follow-up review, not findings on any individual provider.
+
+## What This Project Does
+
+- Builds provider-service and provider-level audit-priority features from public CMS Medicare Part B data.
+- Applies anomaly detection plus domain-informed weak supervision to create an audit-priority label.
+- Trains Logistic Regression, XGBoost, and LightGBM models to learn the weak-supervision framework under leakage controls.
+- Uses the OIG LEIE list only as directional external validation, not as a fraud label or training target.
+- Simulates review-capacity tradeoffs and illustrative recovery-potential ranges with Monte Carlo.
+- Adds a behavioral health audit-priority module using tightened provider-type and service-concentration logic.
+
+## What This Project Does Not Do
+
+- It does not identify fraud.
+- It does not estimate actual recoveries.
+- It does not make audit findings.
+- It does not determine overpayments, noncompliance, medical necessity, documentation sufficiency, or parity compliance.
+- It does not use internal government data, PHI, PII, case files, draft findings, or non-public records.
+
+## Why This Matters
+
+Medicare Part B pays roughly $250B annually to 1.2M+ providers across 6,000+ HCPCS procedure codes. Review teams have to prioritize limited capacity against millions of claim lines, and rules-based filters alone miss combined or contextual patterns. Domain-informed features, weak-supervision modeling, and capacity-scenario simulation give reviewers a defensible starting point for where to look first under public-data review signals — without claiming any individual provider has done anything wrong.
+
+## Current Full-Data Results
+
+| Metric | Value |
+|--------|-------|
+| CMS Provider-Service rows processed | 9,755,427 |
+| Provider-level analytical table | 1,148,873 providers |
+| Weak-label positives | 31,207 (2.716% prevalence) |
+| LEIE-matched Part B providers | 318 |
+| LEIE directional external validation | LEIE-matched providers showed ~2× the weak-label rate of non-LEIE providers (directional check only, not a fraud label) |
+| Best supervised model | LightGBM |
+| LightGBM PR-AUC | 0.9898 |
+| LightGBM ROC AUC | 0.9997 |
+| LightGBM Precision@100 / @500 / @1,000 | 1.0000 / 1.0000 / 1.0000 |
+| LightGBM Lift@100 | 36.82× |
+| Monte Carlo capacity scenarios | Top 100 / 500 / 1,000 / 5,000 / 10,000 providers, scored with `lgb_full_probability` |
+| Recovery-potential outputs | Illustrative scenario ranges from analyst-defined assumptions, not actual recoveries |
+| Behavioral health cohort (after tightening) | 46,711 providers (4.07% of full provider population) |
+| Behavioral health provider-service rows | 302,604 |
+| Behavioral health weak-label positives | 249 |
+| Behavioral health Top-25 lift vs cohort baseline | 187.6× |
+
+PR-AUC, precision@k, and lift figures reflect how well the supervised model reconstructs the weak-supervision audit-priority framework defined in Notebook 02 — they are not measures of confirmed real-world audit outcomes. See [Important Limitation](#important-limitation) for the full framing.
+
+## Technical Stack
+
+Python, pandas, NumPy, scikit-learn, XGBoost, LightGBM, RAPIDS cuDF (with pandas fallback), Plotly / matplotlib / seaborn, joblib, pyarrow / Parquet, Jupyter, WSL2 Ubuntu 24.04, NVIDIA RTX 5080, Git / GitHub.
+
+## Reproducibility Note
+
+Large public CMS CSV files, processed Parquet feature tables, model artifacts, and generated report figures are **not committed to this repository**. They are reproducible locally from the public source data using the scripts in [src/](src/) and the notebooks in [notebooks/](notebooks/). See [Quick Start](#quick-start) for the regeneration steps and [Generated Outputs](#generated-outputs) for the full list of artifacts produced by a local run.
 
 ---
 
@@ -17,14 +69,6 @@ Built by a federal healthcare auditor (HHS/OIG, ~11 years) to demonstrate how do
 | 05 — Behavioral Health Audit-Priority Module | ✅ Complete (full run) | Public-data behavioral-health cohort built from CMS specialty text, HCPCS codes, and HCPCS descriptions, with a tightened provider-level qualification rule and a focused review-priority worklist plus capacity scenarios |
 
 > All ✅ Complete entries above reflect the **full production-scale run** against the complete CMS Medicare Part B Provider-Service file (9,755,427 provider-service rows / 1,148,873 providers). An earlier 500,000-row development sample was used during prototyping to keep iteration cycles short; the headline metrics in this README now reflect the full run, not that earlier sample.
-
----
-
-## Problem Statement
-
-Medicare Part B pays ~$250B annually to 1.2M+ providers across 6,000+ HCPCS procedure codes. Audit teams must prioritize limited review capacity against millions of claim lines, and rules-based filters alone miss combined or contextual patterns.
-
-This platform applies gradient-boosted ensemble models and Monte Carlo simulation to rank providers by audit-priority across the entire provider population, using domain-informed review signals rather than manual referral alone. Rankings are a starting point for review, not findings.
 
 ## Architecture
 
