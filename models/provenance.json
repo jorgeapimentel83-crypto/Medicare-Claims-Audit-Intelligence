@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "declared_by": "Jorge Pimentel",
+  "declared_on": "2026-07-06",
+  "lineages": [
+    {
+      "id": "full-population-2022",
+      "status": "authoritative",
+      "population": "Full 2022 Medicare Part B provider population",
+      "model": "models/best_model_2022_full.joblib",
+      "metadata": "models/best_model_2022_full_metadata.json"
+    },
+    {
+      "id": "development-sample-2022",
+      "status": "superseded",
+      "superseded_by": "full-population-2022",
+      "population": "500,000-row development sample (~58,866 providers) used for iteration speed during prototyping",
+      "reason": "Development-sample figures superseded by the full-population run; not to be cited as headline metrics.",
+      "model": "models/best_model_2022.joblib",
+      "metadata": "models/best_model_2022_metadata.json"
+    }
+  ]
+}

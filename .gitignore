@@ -12,6 +12,7 @@ outputs/
 
 # Saved models
 models/*.json
+!models/provenance.json
 models/*.txt
 models/*.pkl
 
