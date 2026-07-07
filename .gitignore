@@ -13,6 +13,7 @@ outputs/
 # Saved models
 models/*.json
 !models/provenance.json
+!models/leakage_constituents.json
 models/*.txt
 models/*.pkl
 

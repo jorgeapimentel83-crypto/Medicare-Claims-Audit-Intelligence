@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "declared_by": "Jorge Pimentel",
+  "declared_on": "2026-07-06",
+  "target_column": "weak_label_high_audit_priority",
+  "label_construction_reference": "notebooks/02_anomaly_detection.py (weak-label assembly); notebooks/03_model_training.py (leakage-column exclusion)",
+  "direct_constituents": [
+    "iso_anomaly_flag",
+    "iso_anomaly_score",
+    "extreme_composite_risk",
+    "extreme_peer_deviation"
+  ],
+  "residual_features": [
+    "feat_composite_risk_max",
+    "feat_max_peer_deviation_max",
+    "feat_zscore_mdcr_pymt_amt_mean",
+    "feat_zscore_mdcr_pymt_amt_max",
+    "feat_zscore_mdcr_pymt_amt_median",
+    "feat_zscore_sbmtd_chrg_mean",
+    "feat_zscore_sbmtd_chrg_max",
+    "feat_zscore_sbmtd_chrg_median",
+    "feat_zscore_srvcs_mean",
+    "feat_zscore_srvcs_max",
+    "feat_zscore_srvcs_median"
+  ]
+}
