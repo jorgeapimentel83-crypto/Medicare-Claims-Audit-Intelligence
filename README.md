@@ -339,6 +339,8 @@ To keep the supervised models from trivially recovering the weak-supervision lab
 - `provider_type`, `provider_state`, `provider_entity_type` — categorical identifiers held out to keep the model from memorizing slices
 - All `feat_composite_risk*` columns — composite review signals upstream of the label
 
+A residual consideration remains after these exclusions. The `extreme_peer_deviation` flag is excluded, but the continuous features it is thresholded from — `feat_max_peer_deviation_max` and the `feat_zscore_*` family — are retained in the feature set, since they are also independently meaningful signals of unusual billing. The model therefore never sees the thresholded flag, only the continuous magnitude beneath it. This gives partial purchase on one of the label's two disjunctive arms, but the effect is bounded: the label's required Isolation Forest term is excluded entirely, so the model cannot observe the arm the label requires by logical AND. This residual path is documented and accepted rather than removed; see the feature-leakage assessment in the audit framework's evidence records.
+
 This keeps the reported PR-AUC, precision@k, and lift figures interpretable as "how well the model reconstructs the weak-supervision audit-priority framework from upstream features," not "how well it memorizes its own label."
 
 ## Important Limitation
