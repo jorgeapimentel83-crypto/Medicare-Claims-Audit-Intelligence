@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "declared_by": "Jorge Pimentel",
+  "declared_on": "2026-07-14",
+  "environment_file": "environment.yml",
+  "declared_env_name": "medicare-audit",
+  "authoritative_run_environment": "medicare-audit",
+  "attestation": "The authoritative full-population 2022 run (models/best_model_2022_full.joblib and its scored outputs) was executed in the medicare-audit conda environment created from environment.yml.",
+  "known_divergences": [
+    {
+      "id": "rapids-cpu-fallback",
+      "summary": "environment.yml declares RAPIDS (cudf, cuml) as dependencies, but at full population scale cuDF encountered segmentation faults and processing fell back to pandas on CPU. RAPIDS components were therefore not on the critical path for the authoritative headline metrics.",
+      "implication": "A fresh user does not require a working RAPIDS/GPU installation to reproduce the authoritative results, despite the Quick Start implying otherwise."
+    }
+  ]
+}
