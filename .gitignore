@@ -14,6 +14,7 @@ outputs/
 models/*.json
 !models/provenance.json
 !models/leakage_constituents.json
+!models/score_output_expectations.json
 models/*.txt
 models/*.pkl
 

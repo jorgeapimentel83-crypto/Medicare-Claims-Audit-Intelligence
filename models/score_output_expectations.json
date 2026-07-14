@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "declared_by": "Jorge Pimentel",
+  "declared_on": "2026-07-13",
+  "artifact": "data/processed/model_predictions_full_population_2022_full.parquet",
+  "identifier_column": "Rndrng_NPI",
+  "identifier_unique": true,
+  "expected_row_count": 1148873,
+  "score_columns": ["lr_full_probability", "xgb_full_probability", "lgb_full_probability"],
+  "authoritative_score_column": "lgb_full_probability",
+  "target_column": "weak_label_high_audit_priority",
+  "requires_full_run_workspace": true
+}
