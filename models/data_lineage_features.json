@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "declared_by": "Jorge Pimentel",
+  "declared_on": "2026-07-14",
+  "family": "features_provider_service_2022",
+  "family_pattern": "features_provider_service_2022*.parquet",
+  "workspace_dir": "data/processed",
+  "workspace_note": "All family members are gitignored full-run-workspace artifacts, reproducible from public CMS source data via the documented pipeline. Their absence on a clean clone is the normal, expected state and is not a lineage defect.",
+  "role_vocabulary": ["authoritative", "development", "intermediate-scale-run"],
+  "members": [
+    {
+      "file": "features_provider_service_2022_full.parquet",
+      "role": "authoritative",
+      "purpose": "Full 2022 Medicare Part B provider-service feature table; input to the authoritative full-population run."
+    },
+    {
+      "file": "features_provider_service_2022.parquet",
+      "role": "development",
+      "purpose": "500,000-row development sample under its working name; the name the development pipeline reads."
+    },
+    {
+      "file": "features_provider_service_2022_sample_1000000.parquet",
+      "role": "intermediate-scale-run",
+      "purpose": "1,000,000-row incremental scale-up artifact; retained as the engineering record of staged de-risking before the full-population run."
+    },
+    {
+      "file": "features_provider_service_2022_sample_2000000.parquet",
+      "role": "intermediate-scale-run",
+      "purpose": "2,000,000-row incremental scale-up artifact; retained as the engineering record of staged de-risking before the full-population run."
+    },
+    {
+      "file": "features_provider_service_2022_sample_5000000.parquet",
+      "role": "intermediate-scale-run",
+      "purpose": "5,000,000-row incremental scale-up artifact; retained as the engineering record of staged de-risking before the full-population run."
+    }
+  ],
+  "removed_members": [
+    {
+      "file": "features_provider_service_2022_sample_500000.parquet",
+      "removed_on": "2026-07-14",
+      "reason": "Verified byte-identical duplicate of features_provider_service_2022.parquet (matching size, MD5, and SHA-256; zero code references). The unsuffixed working name was retained.",
+      "evidence_ref": "duplicate_verification_record"
+    }
+  ]
+}

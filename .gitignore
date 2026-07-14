@@ -16,6 +16,7 @@ models/*.json
 !models/leakage_constituents.json
 !models/score_output_expectations.json
 !models/environment_provenance.json
+!models/data_lineage_features.json
 models/*.txt
 models/*.pkl
 
