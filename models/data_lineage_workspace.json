@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "declared_by": "Jorge Pimentel",
+  "declared_on": "2026-07-14",
+  "workspace_dir": "data/processed",
+  "workspace_note": "All members are gitignored full-run-workspace artifacts, reproducible from public CMS source data via the documented pipeline. Absence on a clean clone is the normal, expected state and is not a lineage defect. The feature-table family (features_provider_service_2022*) is governed separately by models/data_lineage_features.json and is deliberately outside this declaration's patterns.",
+  "naming_caveat": "The token 'full' is overloaded across historical filenames in this workspace: it can denote the full-population scoring scope, the full-lineage pipeline run, or both at once (e.g. model_predictions_full_population_2022.parquet is the development lineage scoring its own 58,866-provider population; model_predictions_full_population_2022_full.parquet is the authoritative full-population scoring). Filenames are retained because notebooks reference them; this declaration is the control that makes each file's true nature explicit.",
+  "role_vocabulary": ["authoritative", "development"],
+  "families": [
+    {
+      "family": "model_predictions",
+      "family_pattern": "model_predictions*.parquet",
+      "members": [
+        {
+          "file": "model_predictions_2022.parquet",
+          "role": "development",
+          "kind": "test-set-evaluation",
+          "purpose": "Development lineage held-out test-set evaluation output (11,774 rows with y_true ground truth); source of development-era evaluation metrics."
+        },
+        {
+          "file": "model_predictions_2022_full.parquet",
+          "role": "authoritative",
+          "kind": "test-set-evaluation",
+          "purpose": "Authoritative lineage held-out test-set evaluation output (229,775 rows with y_true); source of the headline PR-AUC/ROC-AUC metrics."
+        },
+        {
+          "file": "model_predictions_full_population_2022.parquet",
+          "role": "development",
+          "kind": "population-scoring",
+          "purpose": "Development lineage scoring of its own 58,866-provider development population (weak label plus lr/xgb full-probability columns)."
+        },
+        {
+          "file": "model_predictions_full_population_2022_full.parquet",
+          "role": "authoritative",
+          "kind": "population-scoring",
+          "purpose": "Authoritative scoring of the full 1,148,873-provider 2022 population; the parquet whose integrity C-SG-001 audits. This declaration governs family accounting only; C-SG-001 owns content validation."
+        }
+      ]
+    },
+    {
+      "family": "provider_features_labeled",
+      "family_pattern": "provider_features_labeled*.parquet",
+      "members": [
+        {
+          "file": "provider_features_labeled_2022.parquet",
+          "role": "development",
+          "kind": "labeled-feature-table",
+          "purpose": "Development lineage per-provider feature table with the weak-supervision label attached; input to development model training."
+        },
+        {
+          "file": "provider_features_labeled_2022_full.parquet",
+          "role": "authoritative",
+          "kind": "labeled-feature-table",
+          "purpose": "Authoritative full-population per-provider labeled feature table; input to the authoritative model training run."
+        }
+      ]
+    },
+    {
+      "family": "downstream_analyses",
+      "family_pattern": "*_scenarios_2022_full.parquet",
+      "additional_patterns": ["monte_carlo_recovery_potential_2022_full.parquet", "behavioral_health_top_providers_2022_full.parquet"],
+      "members": [
+        {
+          "file": "audit_capacity_scenarios_2022_full.parquet",
+          "role": "authoritative",
+          "kind": "capacity-scenario-analysis",
+          "purpose": "Audit-capacity scenario analysis over the authoritative scored population (NB04)."
+        },
+        {
+          "file": "monte_carlo_recovery_potential_2022_full.parquet",
+          "role": "authoritative",
+          "kind": "recovery-simulation",
+          "purpose": "Monte Carlo recovery-potential simulation over the authoritative scored population (NB04)."
+        },
+        {
+          "file": "behavioral_health_top_providers_2022_full.parquet",
+          "role": "authoritative",
+          "kind": "module-analysis",
+          "purpose": "Behavioral-health module top-provider analysis over the authoritative scored population (NB05)."
+        },
+        {
+          "file": "behavioral_health_capacity_scenarios_2022_full.parquet",
+          "role": "authoritative",
+          "kind": "module-capacity-scenario-analysis",
+          "purpose": "Behavioral-health module capacity-scenario analysis over the authoritative scored population (NB05)."
+        }
+      ]
+    },
+    {
+      "family": "feature_metadata",
+      "family_pattern": "feature_metadata*.json",
+      "members": [
+        {
+          "file": "feature_metadata_2022.json",
+          "role": "development",
+          "kind": "feature-dictionary",
+          "purpose": "Development-era feature dictionary keyed by engineered feature name; documents feature definitions, not pipeline provenance. Despite the sibling naming, this is a different document type from feature_metadata_2022_full.json."
+        },
+        {
+          "file": "feature_metadata_2022_full.json",
+          "role": "authoritative",
+          "kind": "pipeline-provenance-record",
+          "purpose": "Authoritative full-run pipeline provenance record (source CSV, output parquet, mode, row/column counts, feature columns). Despite the sibling naming, this is a different document type from feature_metadata_2022.json."
+        }
+      ]
+    }
+  ],
+  "removed_members": []
+}

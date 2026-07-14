@@ -17,6 +17,7 @@ models/*.json
 !models/score_output_expectations.json
 !models/environment_provenance.json
 !models/data_lineage_features.json
+!models/data_lineage_workspace.json
 models/*.txt
 models/*.pkl
 
