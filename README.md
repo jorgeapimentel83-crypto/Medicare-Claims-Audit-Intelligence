@@ -52,6 +52,10 @@ PR-AUC, precision@k, and lift figures reflect how well the supervised model reco
 
 Python, pandas, NumPy, scikit-learn, XGBoost, LightGBM, RAPIDS cuDF (with pandas fallback), Plotly / matplotlib / seaborn, joblib, pyarrow / Parquet, Jupyter, WSL2 Ubuntu 24.04, NVIDIA RTX 5080, Git / GitHub.
 
+## Independent Audit Governance
+
+This platform is audited by the AI Audit Framework maintained in the companion cms-policy-rag repository. Nine checks (C-ME-001/002/003, C-LS-001, C-SG-001/002, C-PR-001, C-DL-001/002) validate the platform's model metadata, provenance completeness and README agreement, label-constituent leakage controls, scored-output and downstream-output content integrity, environment provenance, and data lineage. The checks are driven by seven machine-readable declarations tracked in this repository's models/ directory (provenance, leakage constituents, score and downstream output expectations, environment provenance, and two data-lineage declarations), each an owner-signed attestation the framework verifies at runtime. Audit evidence — including the first full clean-sweep register of this platform (2026-07-14-220917) — is custodied in the audit framework's evidence archive, following the principle that the auditor, not the auditee, holds the working papers.
+
 ## Reproducibility Note
 
 Large public CMS CSV files, processed Parquet feature tables, model artifacts, and generated report figures are **not committed to this repository**. They are reproducible locally from the public source data using the scripts in [src/](src/) and the notebooks in [notebooks/](notebooks/). See [Quick Start](#quick-start) for the regeneration steps and [Generated Outputs](#generated-outputs) for the full list of artifacts produced by a local run.
@@ -155,7 +159,7 @@ medicare-claims-audit-intelligence/
 │   ├── modeling.py                 # XGBoost + LightGBM GPU ensemble
 │   ├── evaluation.py               # Audit-specific metrics (precision@k, AUCPR)
 │   └── simulation.py               # Monte Carlo recovery-potential simulation
-├── models/                         # Saved model artifacts
+├── models/                         # Model artifacts (gitignored) + seven tracked governance declarations (JSON)
 ├── reports/                        # Generated plots and analysis
 ├── outputs/                        # Final deliverables
 ├── tests/
