@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "declared_by": "Jorge Pimentel",
+  "declared_on": "2026-07-15",
+  "workspace_dir": "data/processed",
+  "workspace_note": "All files are gitignored full-run-workspace artifacts. Their absence on a clean clone means content validation cannot run; the check reports this as an informative error naming the full-run-workspace requirement (posture 3, per C-SG-001), because content validation cannot meaningfully degrade to a partial pass.",
+  "files": [
+    {
+      "file": "monte_carlo_recovery_potential_2022_full.parquet",
+      "produced_by": "notebooks/04_monte_carlo_simulation.py",
+      "required_columns": ["capacity_label", "providers_reviewed", "weak_label_hits", "n_trials", "simulated_recovery_potential_mean", "simulated_recovery_potential_median", "simulated_recovery_potential_p10", "simulated_recovery_potential_p90", "simulated_recovery_potential_min", "simulated_recovery_potential_max"],
+      "invariants": [
+        {"type": "row_count_equals", "value": 5},
+        {"type": "columns_ordered_rowwise", "columns": ["simulated_recovery_potential_min", "simulated_recovery_potential_p10", "simulated_recovery_potential_median", "simulated_recovery_potential_p90", "simulated_recovery_potential_max"]},
+        {"type": "column_within_columns", "column": "simulated_recovery_potential_mean", "lower": "simulated_recovery_potential_min", "upper": "simulated_recovery_potential_max"},
+        {"type": "columns_non_negative", "columns": ["simulated_recovery_potential_mean", "simulated_recovery_potential_median", "simulated_recovery_potential_p10", "simulated_recovery_potential_p90", "simulated_recovery_potential_min", "simulated_recovery_potential_max"]},
+        {"type": "column_positive", "column": "n_trials"}
+      ]
+    },
+    {
+      "file": "audit_capacity_scenarios_2022_full.parquet",
+      "produced_by": "notebooks/04_monte_carlo_simulation.py",
+      "required_columns": ["capacity_label", "providers_reviewed", "weak_label_hits", "weak_label_precision", "weak_label_recall", "lift_vs_random", "conservative_recovery_potential", "moderate_recovery_potential", "high_recovery_potential"],
+      "invariants": [
+        {"type": "row_count_equals", "value": 5},
+        {"type": "columns_bounded_01", "columns": ["weak_label_precision", "weak_label_recall"]},
+        {"type": "column_positive", "column": "lift_vs_random"},
+        {"type": "column_lte_column", "column": "weak_label_hits", "upper": "providers_reviewed"},
+        {"type": "columns_ordered_rowwise", "columns": ["conservative_recovery_potential", "moderate_recovery_potential", "high_recovery_potential"]}
+      ]
+    },
+    {
+      "file": "behavioral_health_capacity_scenarios_2022_full.parquet",
+      "produced_by": "notebooks/05_behavioral_health_module.py",
+      "required_columns": ["capacity_label", "providers_reviewed", "weak_label_hits", "weak_label_precision", "weak_label_recall", "lift_vs_random"],
+      "invariants": [
+        {"type": "row_count_equals", "value": 6},
+        {"type": "columns_bounded_01", "columns": ["weak_label_precision", "weak_label_recall"]},
+        {"type": "column_positive", "column": "lift_vs_random"},
+        {"type": "column_lte_column", "column": "weak_label_hits", "upper": "providers_reviewed"}
+      ]
+    },
+    {
+      "file": "behavioral_health_top_providers_2022_full.parquet",
+      "produced_by": "notebooks/05_behavioral_health_module.py",
+      "classification_note": "Behavioral-health membership is SERVICE-BASED, not specialty-based: a provider of any specialty enters this file if their service rows match the module's three-signal classification (HCPCS description keyword match; curated behavioral-health CPT/HCPCS code list; H-code range H0001-H2037). The signal definitions are single-sourced in notebooks/05_behavioral_health_module.py by design; this declaration documents the mechanism and validates the output's structure, deliberately avoiding a second copy of the code lists that could drift.",
+      "required_columns": ["Rndrng_NPI", "provider_type", "provider_state", "risk_score", "weak_label_high_audit_priority", "bh_service_rows", "bh_unique_hcpcs", "bh_total_services", "bh_total_benes", "bh_total_medicare_payment", "bh_avg_charge_to_allowed", "bh_max_peer_deviation"],
+      "invariants": [
+        {"type": "column_unique", "column": "Rndrng_NPI"},
+        {"type": "columns_bounded_01", "columns": ["risk_score"]},
+        {"type": "columns_non_negative", "columns": ["bh_service_rows", "bh_unique_hcpcs", "bh_total_services", "bh_total_benes", "bh_total_medicare_payment"]}
+      ]
+    }
+  ]
+}

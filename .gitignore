@@ -18,6 +18,7 @@ models/*.json
 !models/environment_provenance.json
 !models/data_lineage_features.json
 !models/data_lineage_workspace.json
+!models/downstream_output_expectations.json
 models/*.txt
 models/*.pkl
 
